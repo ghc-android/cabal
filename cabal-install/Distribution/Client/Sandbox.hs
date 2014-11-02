@@ -41,8 +41,9 @@ module Distribution.Client.Sandbox (
 
 import Distribution.Client.Setup
   ( SandboxFlags(..), ConfigFlags(..), ConfigExFlags(..), InstallFlags(..)
-  , GlobalFlags(..), defaultConfigExFlags, defaultInstallFlags
-  , defaultSandboxLocation, globalRepos )
+  , GlobalFlags(..), SetupWrapperFlags(..)
+  , defaultConfigExFlags, defaultInstallFlags, defaultSandboxLocation
+  , globalRepos )
 import Distribution.Client.Sandbox.Timestamp  ( listModifiedDeps
                                               , maybeAddCompilerTimestampRecord
                                               , withAddTimestamps
@@ -549,12 +550,13 @@ data WereDepsReinstalled = ReinstalledSomeDeps | NoDepsReinstalled
 -- | Reinstall those add-source dependencies that have been modified since
 -- we've last installed them. Assumes that we're working inside a sandbox.
 reinstallAddSourceDeps :: Verbosity
-                          -> ConfigFlags  -> ConfigExFlags
-                          -> InstallFlags -> GlobalFlags
+                          -> ConfigFlags  -> ConfigExFlags -> InstallFlags
+                          -> GlobalFlags -> SetupWrapperFlags
                           -> FilePath
                           -> IO WereDepsReinstalled
-reinstallAddSourceDeps verbosity configFlags' configExFlags
-                       installFlags globalFlags sandboxDir = topHandler' $ do
+reinstallAddSourceDeps verbosity configFlags' configExFlags installFlags
+                       globalFlags setupWrapperFlags
+                       sandboxDir = topHandler' $ do
   let sandboxDistPref     = sandboxBuildDir sandboxDir
       configFlags         = configFlags'
                             { configDistPref  = Flag sandboxDistPref }
@@ -572,7 +574,8 @@ reinstallAddSourceDeps verbosity configFlags' configExFlags
                  ,(globalRepos globalFlags)
                  ,comp, platform, conf
                  ,UseSandbox sandboxDir, Just sandboxPkgInfo
-                 ,globalFlags, configFlags, configExFlags, installFlags
+                 ,globalFlags, setupWrapperFlags
+                 ,configFlags, configExFlags, installFlags
                  ,haddockFlags)
 
       -- This can actually be replaced by a call to 'install', but we use a
@@ -682,34 +685,40 @@ maybeReinstallAddSourceDeps :: Verbosity
                                -> ConfigFlags      -- ^ Saved configure flags
                                                    -- (from dist/setup-config)
                                -> GlobalFlags
+                               -> SetupWrapperFlags
                                -> IO (UseSandbox, SavedConfig
                                      ,WereDepsReinstalled)
-maybeReinstallAddSourceDeps verbosity numJobsFlag configFlags' globalFlags' = do
+maybeReinstallAddSourceDeps verbosity
+                            numJobsFlag
+                            configFlags'
+                            globalFlags'
+                            setupWrapperFlags' = do
   (useSandbox, config) <- loadConfigOrSandboxConfig verbosity globalFlags'
                           (configUserInstall configFlags')
   case useSandbox of
     NoSandbox             -> return (NoSandbox, config, NoDepsReinstalled)
     UseSandbox sandboxDir -> do
       -- Reinstall the modified add-source deps.
-      let configFlags    = savedConfigureFlags config
-                           `mappendSomeSavedFlags`
-                           configFlags'
-          configExFlags  = defaultConfigExFlags
-                           `mappend` savedConfigureExFlags config
-          installFlags'  = defaultInstallFlags
-                           `mappend` savedInstallFlags config
-          installFlags   = installFlags' {
-            installNumJobs    = installNumJobs installFlags'
-                                `mappend` numJobsFlag
+      let configFlags       = savedConfigureFlags config
+                              `mappendSomeSavedFlags` configFlags'
+          configExFlags     = defaultConfigExFlags
+                              `mappend` savedConfigureExFlags config
+          installFlags'     = defaultInstallFlags
+                              `mappend` savedInstallFlags config
+          installFlags      = installFlags' {
+            installNumJobs      = installNumJobs installFlags'
+                                  `mappend` numJobsFlag
             }
-          globalFlags    = savedGlobalFlags config
           -- This makes it possible to override things like 'remote-repo-cache'
           -- from the command line. These options are hidden, and are only
           -- useful for debugging, so this should be fine.
-                           `mappend` globalFlags'
+          globalFlags       = savedGlobalFlags config
+                              `mappend` globalFlags'
+          setupWrapperFlags = savedSetupWrapperFlags config
+                              `mappend` setupWrapperFlags'
       depsReinstalled <- reinstallAddSourceDeps verbosity
                          configFlags configExFlags installFlags globalFlags
-                         sandboxDir
+                         setupWrapperFlags sandboxDir
       return (UseSandbox sandboxDir, config, depsReinstalled)
 
   where

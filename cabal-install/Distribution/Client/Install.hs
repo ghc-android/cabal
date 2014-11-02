@@ -72,6 +72,7 @@ import qualified Distribution.Client.InstallPlan as InstallPlan
 import Distribution.Client.InstallPlan (InstallPlan)
 import Distribution.Client.Setup
          ( GlobalFlags(..)
+         , SetupWrapperFlags(..)
          , ConfigFlags(..), configureCommand, filterConfigureFlags
          , ConfigExFlags(..), InstallFlags(..) )
 import Distribution.Client.Config
@@ -86,7 +87,8 @@ import Distribution.Client.Types as Source
 import Distribution.Client.BuildReports.Types
          ( ReportLevel(..) )
 import Distribution.Client.SetupWrapper
-         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions )
+         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions
+         , updateSetupScriptOptions )
 import qualified Distribution.Client.BuildReports.Anonymous as BuildReports
 import qualified Distribution.Client.BuildReports.Storage as BuildReports
          ( storeAnonymous, storeLocal, fromInstallPlan, fromPlanningFailure )
@@ -179,6 +181,7 @@ install
   -> UseSandbox
   -> Maybe SandboxPackageInfo
   -> GlobalFlags
+  -> SetupWrapperFlags
   -> ConfigFlags
   -> ConfigExFlags
   -> InstallFlags
@@ -186,8 +189,8 @@ install
   -> [UserTarget]
   -> IO ()
 install verbosity packageDBs repos comp platform conf useSandbox mSandboxPkgInfo
-  globalFlags configFlags configExFlags installFlags haddockFlags
-  userTargets0 = do
+  globalFlags setupWrapperFlags configFlags configExFlags installFlags
+  haddockFlags userTargets0 = do
 
     installContext <- makeInstallContext verbosity args (Just userTargets0)
     planResult     <- foldProgress logMsg (return . Left) (return . Right) =<<
@@ -201,9 +204,9 @@ install verbosity packageDBs repos comp platform conf useSandbox mSandboxPkgInfo
             processInstallPlan verbosity args installContext installPlan
   where
     args :: InstallArgs
-    args = (packageDBs, repos, comp, platform, conf, useSandbox, mSandboxPkgInfo,
-            globalFlags, configFlags, configExFlags, installFlags,
-            haddockFlags)
+    args = (packageDBs, repos, comp, platform, conf, useSandbox,
+            mSandboxPkgInfo, globalFlags, setupWrapperFlags, configFlags,
+            configExFlags, installFlags, haddockFlags)
 
     die' message = die (message ++ if isUseSandbox useSandbox
                                    then installFailedInSandbox else [])
@@ -231,6 +234,7 @@ type InstallArgs = ( PackageDBStack
                    , UseSandbox
                    , Maybe SandboxPackageInfo
                    , GlobalFlags
+                   , SetupWrapperFlags
                    , ConfigFlags
                    , ConfigExFlags
                    , InstallFlags
@@ -241,7 +245,7 @@ makeInstallContext :: Verbosity -> InstallArgs -> Maybe [UserTarget]
                       -> IO InstallContext
 makeInstallContext verbosity
   (packageDBs, repos, comp, _, conf,_,_,
-   globalFlags, _, _, _, _) mUserTargets = do
+   globalFlags, _, _, _, _, _) mUserTargets = do
 
     installedPkgIndex <- getInstalledPackages verbosity comp packageDBs conf
     sourcePkgDb       <- getSourcePackages    verbosity repos
@@ -271,7 +275,7 @@ makeInstallPlan :: Verbosity -> InstallArgs -> InstallContext
                 -> IO (Progress String String InstallPlan)
 makeInstallPlan verbosity
   (_, _, comp, platform, _, _, mSandboxPkgInfo,
-   _, configFlags, configExFlags, installFlags,
+   _, _, configFlags, configExFlags, installFlags,
    _)
   (installedPkgIndex, sourcePkgDb,
    _, pkgSpecifiers) = do
@@ -288,7 +292,7 @@ processInstallPlan :: Verbosity -> InstallArgs -> InstallContext
                    -> InstallPlan
                    -> IO ()
 processInstallPlan verbosity
-  args@(_,_, comp, _, _, _, _, _, _, _, installFlags, _)
+  args@(_,_, comp, _, _, _, _, _, _, _, _, installFlags, _)
   (installedPkgIndex, sourcePkgDb,
    userTargets, pkgSpecifiers) installPlan = do
     checkPrintPlan verbosity comp installedPkgIndex installPlan sourcePkgDb
@@ -654,7 +658,7 @@ printPlan dryRun verbosity plan sourcePkgDb = case plan of
 -- 'postInstallActions', as (by definition) we don't have an install plan.
 reportPlanningFailure :: Verbosity -> InstallArgs -> InstallContext -> String -> IO ()
 reportPlanningFailure verbosity
-  (_, _, comp, platform, _, _, _
+  (_, _, comp, platform, _, _, _, _
   ,_, configFlags, _, installFlags, _)
   (_, sourcePkgDb, _, pkgSpecifiers)
   message = do
@@ -730,7 +734,7 @@ postInstallActions :: Verbosity
                    -> IO ()
 postInstallActions verbosity
   (packageDBs, _, comp, platform, conf, useSandbox, mSandboxPkgInfo
-  ,globalFlags, configFlags, _, installFlags, _)
+  ,globalFlags, _, configFlags, _, installFlags, _)
   targets installPlan = do
 
   unless oneShot $
@@ -966,7 +970,8 @@ performInstallations :: Verbosity
                      -> IO InstallPlan
 performInstallations verbosity
   (packageDBs, _, comp, _, conf, useSandbox, _,
-   globalFlags, configFlags, configExFlags, installFlags, haddockFlags)
+   globalFlags, setupWrapperFlags, configFlags, configExFlags, installFlags,
+   haddockFlags)
   installedPkgIndex installPlan = do
 
   -- With 'install -j' it can be a bit hard to tell whether a sandbox is used.
@@ -1006,7 +1011,8 @@ performInstallations verbosity
     distPref        = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
                       (configDistPref configFlags)
 
-    setupScriptOptions index lock = SetupScriptOptions {
+    setupScriptOptions index lock =
+      updateSetupScriptOptions setupWrapperFlags $ defaultSetupScriptOptions {
       useCabalVersion  = chooseCabalVersion configExFlags
                          (libVersion miscOptions),
       useCompiler      = Just comp,

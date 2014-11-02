@@ -12,6 +12,7 @@
 -----------------------------------------------------------------------------
 module Distribution.Client.Setup
     ( globalCommand, GlobalFlags(..), defaultGlobalFlags, globalRepos
+    , SetupWrapperFlags(..), setupWrapperOptions
     , configureCommand, ConfigFlags(..), filterConfigureFlags
     , configureExCommand, ConfigExFlags(..), defaultConfigExFlags
                         , configureExOptions
@@ -256,6 +257,48 @@ globalRepos globalFlags = remoteRepos ++ localRepos
       | local <- fromNubList $ globalLocalRepos globalFlags ]
 
 -- ------------------------------------------------------------
+-- * Setup Wrapper flags
+-- ------------------------------------------------------------
+
+-- | Configure how `SetupWrapper` compiles `Setup.hs'.
+--
+-- Allow configuration of the compiler that us used to compile
+-- the setup program when the external setup method is used.
+-- Configuration of these flags is currently hooked to the
+-- configure command. Additionally the user can set these flags
+-- in the cabal user configuration file, e.g. `~/.cabal/config'.
+--
+-- As mentioned in `SetupWrapper' currently this is limited to
+-- GHC.
+data SetupWrapperFlags = SetupWrapperFlags
+                         { setupWrapperGhcPath :: Flag FilePath
+                         , setupWrapperPkgPath :: Flag FilePath
+                         }
+
+setupWrapperOptions :: ShowOrParseArgs -> [OptionField SetupWrapperFlags]
+setupWrapperOptions _showOrParseArgs =
+  [ option [] ["cabal-ghc"]
+    "Select the 'ghc' executable to compile 'Setup.[l]hs' with."
+    setupWrapperGhcPath (\v flags -> flags { setupWrapperGhcPath = v })
+    (reqArgFlag "PATH")
+  , option [] ["cabal-pkg"]
+    "Select the 'ghc-pkg' to use when compiling 'Setup.[l]hs'."
+    setupWrapperPkgPath (\v flags -> flags { setupWrapperPkgPath = v })
+    (reqArgFlag "PATH")
+  ]
+
+instance Monoid SetupWrapperFlags where
+  mempty = SetupWrapperFlags {
+    setupWrapperGhcPath = mempty,
+    setupWrapperPkgPath = mempty
+  }
+  mappend a b = SetupWrapperFlags {
+    setupWrapperGhcPath = combine setupWrapperGhcPath,
+    setupWrapperPkgPath = combine setupWrapperPkgPath
+  }
+    where combine field = field a `mappend` field b
+
+-- ------------------------------------------------------------
 -- * Config flags
 -- ------------------------------------------------------------
 
@@ -315,18 +358,29 @@ defaultConfigExFlags :: ConfigExFlags
 defaultConfigExFlags = mempty { configSolver     = Flag defaultSolver
                               , configAllowNewer = Flag AllowNewerNone }
 
-configureExCommand :: CommandUI (ConfigFlags, ConfigExFlags)
+configureExCommand :: CommandUI (SetupWrapperFlags, ConfigFlags, ConfigExFlags)
 configureExCommand = configureCommand {
-    commandDefaultFlags = (mempty, defaultConfigExFlags),
-    commandOptions      = \showOrParseArgs ->
-         liftOptions fst setFst
-         (filter ((`notElem` ["constraint", "dependency", "exact-configuration"])
-                  . optionName) $ configureOptions  showOrParseArgs)
-      ++ liftOptions snd setSnd (configureExOptions showOrParseArgs)
+    commandDefaultFlags = (mempty, mempty, defaultConfigExFlags),
+    commandOptions = \ sOrP ->    liftFirst  ( setupWrapperOptions sOrP )
+                               ++ liftSecond ( visConfigureOptions sOrP )
+                               ++ liftThird  ( configureExOptions  sOrP )
   }
   where
-    setFst a (_,b) = (a,b)
-    setSnd b (a,_) = (a,b)
+    visConfigureOptions = filter (not . hidden . optionName) . configureOptions
+      where
+        hidden = (`elem` ["constraint", "dependency", "exact-configuration"])
+
+    liftFirst = liftOptions getFirst setFirst
+      where getFirst (a,_,_) = a
+            setFirst a (_,b,c) = (a,b,c)
+
+    liftSecond = liftOptions getSecond setSecond
+      where getSecond (_,b,_) = b
+            setSecond b (a,_,c) = (a,b,c)
+
+    liftThird = liftOptions getThird setThird
+      where getThird (_,_,c) = c
+            setThird c (a,b,_) = (a,b,c)
 
 configureExOptions ::  ShowOrParseArgs -> [OptionField ConfigExFlags]
 configureExOptions _showOrParseArgs =

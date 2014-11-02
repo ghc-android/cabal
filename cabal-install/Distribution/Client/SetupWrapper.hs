@@ -19,6 +19,7 @@ module Distribution.Client.SetupWrapper (
     setupWrapper,
     SetupScriptOptions(..),
     defaultSetupScriptOptions,
+    updateSetupScriptOptions
   ) where
 
 import qualified Distribution.Make as Make
@@ -59,10 +60,14 @@ import Distribution.Simple.Command
          ( CommandUI(..), commandShowOptions )
 import Distribution.Simple.Program.GHC
          ( GhcMode(..), GhcOptions(..), renderGhcOptions )
+import Distribution.Simple.Setup
+         ( flagToMaybe )
 import qualified Distribution.Simple.PackageIndex as PackageIndex
 import Distribution.Simple.PackageIndex (InstalledPackageIndex)
 import Distribution.Client.Config
          ( defaultCabalDir )
+import Distribution.Client.Setup
+         ( SetupWrapperFlags(..) )
 import Distribution.Client.IndexUtils
          ( getInstalledPackages )
 import Distribution.Client.JobControl
@@ -95,7 +100,7 @@ import Control.Applicative ( (<$>), (<*>) )
 import Control.Monad       ( when, unless )
 import Data.List           ( foldl1' )
 import Data.Maybe          ( fromMaybe, isJust )
-import Data.Monoid         ( mempty )
+import Data.Monoid         ( mempty, mappend )
 import Data.Char           ( isSpace )
 
 #ifdef mingw32_HOST_OS
@@ -108,8 +113,23 @@ import System.Directory    ( doesDirectoryExist )
 import qualified System.Win32 as Win32
 #endif
 
+-- | Update options based on flags.
+--
+-- If a flag is missing the corresponding field is not updated.
+updateSetupScriptOptions :: SetupWrapperFlags
+                         -> SetupScriptOptions
+                         -> SetupScriptOptions
+updateSetupScriptOptions flags opts =
+  opts { useGhcPath = flagToMaybe (setupWrapperGhcPath flags)
+                      `mappend` useGhcPath opts
+       , usePkgPath = flagToMaybe (setupWrapperPkgPath flags)
+                      `mappend` usePkgPath opts
+       }
+
 data SetupScriptOptions = SetupScriptOptions {
     useCabalVersion          :: VersionRange,
+    useGhcPath               :: Maybe FilePath,
+    usePkgPath               :: Maybe FilePath,
     useCompiler              :: Maybe Compiler,
     usePlatform              :: Maybe Platform,
     usePackageDB             :: PackageDBStack,
@@ -144,6 +164,8 @@ data SetupScriptOptions = SetupScriptOptions {
 defaultSetupScriptOptions :: SetupScriptOptions
 defaultSetupScriptOptions = SetupScriptOptions {
     useCabalVersion          = anyVersion,
+    useGhcPath               = Nothing,
+    usePkgPath               = Nothing,
     useCompiler              = Nothing,
     usePlatform              = Nothing,
     usePackageDB             = [GlobalPackageDB, UserPackageDB],
@@ -392,8 +414,12 @@ externalSetupMethod verbosity options pkg bt mkargs = do
     (comp, conf) <- case useCompiler options' of
       Just comp -> return (comp, useProgramConfig options')
       Nothing   -> do (comp, _, conf) <-
-                        configCompilerEx (Just GHC) Nothing Nothing
-                        (useProgramConfig options') verbosity
+                        configCompilerEx
+                        (Just GHC)
+                        (useGhcPath options')
+                        (usePkgPath options')
+                        (useProgramConfig options')
+                        verbosity
                       return (comp, conf)
     -- Whenever we need to call configureCompiler, we also need to access the
     -- package index, so let's cache it here.
