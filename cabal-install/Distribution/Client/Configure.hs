@@ -22,12 +22,10 @@ import Distribution.Client.InstallPlan (InstallPlan)
 import Distribution.Client.IndexUtils as IndexUtils
          ( getSourcePackages, getInstalledPackages )
 import Distribution.Client.Setup
-         ( ConfigExFlags(..), configureCommand, filterConfigureFlags
-         , SetupWrapperFlags(..) )
+         ( ConfigExFlags(..), configureCommand, filterConfigureFlags )
 import Distribution.Client.Types as Source
 import Distribution.Client.SetupWrapper
-         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions
-         , updateSetupScriptOptions )
+         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions )
 import Distribution.Client.Targets
          ( userToPackageConstraint )
 
@@ -82,13 +80,12 @@ configure :: Verbosity
           -> Compiler
           -> Platform
           -> ProgramConfiguration
-          -> SetupWrapperFlags
           -> ConfigFlags
           -> ConfigExFlags
           -> [String]
           -> IO ()
 configure verbosity packageDBs repos comp platform conf
-  setupWrapperFlags configFlags configExFlags extraArgs = do
+  configFlags configExFlags extraArgs = do
 
   installedPkgIndex <- getInstalledPackages verbosity comp packageDBs conf
   sourcePkgDb       <- getSourcePackages    verbosity repos
@@ -117,8 +114,7 @@ configure verbosity packageDBs repos comp platform conf
               ++ "one local ready package."
 
   where
-    setupScriptOptions index =
-      updateSetupScriptOptions setupWrapperFlags $ defaultSetupScriptOptions {
+    setupScriptOptions index = SetupScriptOptions {
       useCabalVersion  = chooseCabalVersion configExFlags
                          (flagToMaybe (configCabalVersion configExFlags)),
       useCompiler      = Just comp,

@@ -44,7 +44,6 @@ import Distribution.Client.BuildReports.Types
          ( ReportLevel(..) )
 import Distribution.Client.Setup
          ( GlobalFlags(..), globalCommand, defaultGlobalFlags
-         , SetupWrapperFlags(..), setupWrapperOptions
          , ConfigExFlags(..), configureExOptions, defaultConfigExFlags
          , InstallFlags(..), installOptions, defaultInstallFlags
          , UploadFlags(..), uploadCommand
@@ -128,7 +127,6 @@ import qualified Data.Map as M
 
 data SavedConfig = SavedConfig {
     savedGlobalFlags       :: GlobalFlags,
-    savedSetupWrapperFlags :: SetupWrapperFlags,
     savedInstallFlags      :: InstallFlags,
     savedConfigureFlags    :: ConfigFlags,
     savedConfigureExFlags  :: ConfigExFlags,
@@ -142,7 +140,6 @@ data SavedConfig = SavedConfig {
 instance Monoid SavedConfig where
   mempty = SavedConfig {
     savedGlobalFlags       = mempty,
-    savedSetupWrapperFlags = mempty,
     savedInstallFlags      = mempty,
     savedConfigureFlags    = mempty,
     savedConfigureExFlags  = mempty,
@@ -154,7 +151,6 @@ instance Monoid SavedConfig where
   }
   mappend a b = SavedConfig {
     savedGlobalFlags       = combine savedGlobalFlags,
-    savedSetupWrapperFlags = combine savedSetupWrapperFlags,
     savedInstallFlags      = combine savedInstallFlags,
     savedConfigureFlags    = combine savedConfigureFlags,
     savedConfigureExFlags  = combine savedConfigureExFlags,
@@ -371,7 +367,6 @@ commentSavedConfig = do
   globalInstallDirs <- defaultInstallDirs defaultCompiler False True
   return SavedConfig {
     savedGlobalFlags       = defaultGlobalFlags,
-    savedSetupWrapperFlags = mempty,
     savedInstallFlags      = defaultInstallFlags,
     savedConfigureExFlags  = defaultConfigExFlags,
     savedConfigureFlags    = (defaultConfigFlags defaultProgramConfiguration) {
@@ -392,10 +387,6 @@ configFieldDescriptions =
      toSavedConfig liftGlobalFlag
        (commandOptions globalCommand ParseArgs)
        ["version", "numeric-version", "config-file", "sandbox-config-file"] []
-
-  ++ toSavedConfig liftSetupWrapperFlag
-       (setupWrapperOptions ParseArgs)
-       [] []
 
   ++ toSavedConfig liftConfigFlag
        (configureOptions ParseArgs)
@@ -509,10 +500,6 @@ liftGlobalInstallDirs = liftField
 liftGlobalFlag :: FieldDescr GlobalFlags -> FieldDescr SavedConfig
 liftGlobalFlag = liftField
   savedGlobalFlags (\flags conf -> conf { savedGlobalFlags = flags })
-
-liftSetupWrapperFlag :: FieldDescr SetupWrapperFlags -> FieldDescr SavedConfig
-liftSetupWrapperFlag = liftField
-  savedSetupWrapperFlags (\flags conf -> conf { savedSetupWrapperFlags = flags })
 
 liftConfigFlag :: FieldDescr ConfigFlags -> FieldDescr SavedConfig
 liftConfigFlag = liftField
