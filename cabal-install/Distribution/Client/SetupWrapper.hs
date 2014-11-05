@@ -19,6 +19,7 @@ module Distribution.Client.SetupWrapper (
     setupWrapper,
     SetupScriptOptions(..),
     defaultSetupScriptOptions,
+    setupScriptOptionsFromLBI
   ) where
 
 import qualified Distribution.Make as Make
@@ -40,6 +41,7 @@ import Distribution.PackageDescription.Parse
          ( readPackageDescription )
 import Distribution.Simple.Configure
          ( configCompilerEx )
+import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo(..) )
 import Distribution.Compiler ( buildCompilerId )
 import Distribution.Simple.Compiler
          ( CompilerFlavor(GHC), Compiler(compilerId)
@@ -112,9 +114,9 @@ data SetupScriptOptions = SetupScriptOptions {
     useCabalVersion          :: VersionRange,
     useCompiler              :: Maybe Compiler,
     usePlatform              :: Maybe Platform,
+    useProgramConfig         :: ProgramConfiguration,
     usePackageDB             :: PackageDBStack,
     usePackageIndex          :: Maybe InstalledPackageIndex,
-    useProgramConfig         :: ProgramConfiguration,
     useDistPref              :: FilePath,
     useLoggingHandle         :: Maybe Handle,
     useWorkingDir            :: Maybe FilePath,
@@ -146,9 +148,9 @@ defaultSetupScriptOptions = SetupScriptOptions {
     useCabalVersion          = anyVersion,
     useCompiler              = Nothing,
     usePlatform              = Nothing,
+    useProgramConfig         = emptyProgramConfiguration,
     usePackageDB             = [GlobalPackageDB, UserPackageDB],
     usePackageIndex          = Nothing,
-    useProgramConfig         = emptyProgramConfiguration,
     useDistPref              = defaultDistPref,
     useLoggingHandle         = Nothing,
     useWorkingDir            = Nothing,
@@ -156,6 +158,16 @@ defaultSetupScriptOptions = SetupScriptOptions {
     forceExternalSetupMethod = False,
     setupCacheLock           = Nothing
   }
+
+-- | Overwrite options regarding the compiler to use for @Setup.hs@
+setupScriptOptionsFromLBI :: LocalBuildInfo
+                          -> SetupScriptOptions
+                          -> SetupScriptOptions
+setupScriptOptionsFromLBI lbi opts =
+  opts { useCompiler = Just $ buildCompiler lbi
+       , usePlatform = Just $ buildCompPlatform lbi
+       , useProgramConfig = buildCompProgsCfg lbi
+       }
 
 setupWrapper :: Verbosity
              -> SetupScriptOptions

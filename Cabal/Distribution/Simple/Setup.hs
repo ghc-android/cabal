@@ -250,13 +250,26 @@ instance Monoid GlobalFlags where
 
 -- | Flags to @configure@ command
 data ConfigFlags = ConfigFlags {
+    configBuildHcFlavor :: Flag CompilerFlavor, -- ^\"Flavor\" of the build
+                                                -- compiler specified by
+                                                -- 'configBuildHcPath'. Currently
+                                                -- only GHC is viable.
+    configBuildHc       :: Flag FilePath, -- ^Location of the compiler to use to
+                                          -- build helper programs required by
+                                          -- the build process itself, e.g. to
+                                          -- compile @Setup.hs@ when using
+                                          -- @cabal-install@.
+    configBuildHcPkg    :: Flag FilePath, -- ^Location of the @hc-pkg@ to use
+                                          -- when building artifact for the
+                                          -- build itself, see
+                                          -- 'configBuildHcPath'
+
     --FIXME: the configPrograms is only here to pass info through to configure
     -- because the type of configure is constrained by the UserHooks.
     -- when we change UserHooks next we should pass the initial
     -- ProgramConfiguration directly and not via ConfigFlags
     configPrograms      :: ProgramConfiguration, -- ^All programs that cabal may
                                                  -- run
-
     configProgramPaths  :: [(String, FilePath)], -- ^user specified programs paths
     configProgramArgs   :: [(String, [String])], -- ^user specified programs args
     configProgramPathExtra :: NubList FilePath,  -- ^Extend the $PATH
@@ -371,6 +384,21 @@ configureOptions showOrParseArgs =
       ,optionDistPref
          configDistPref (\d flags -> flags { configDistPref = d })
          showOrParseArgs
+
+      ,option [] ["build-compiler"]
+         "compiler-flavour for build process artifacts such as 'Setup.hs'"
+         configBuildHcFlavor (\v flags -> flags { configBuildHcFlavor = v })
+         (choiceOpt [ (Flag GHC, ("g", ["ghc"]), "compile with GHC") ])
+
+      ,option [] ["with-build-compiler"]
+         "path to compiler for build process artifacts such as 'Setup.hs'"
+         configHcPath (\v flags -> flags { configHcPath = v })
+         (reqArgFlag "PATH")
+
+      ,option [] ["with-build-hc-pkg"]
+         "path to the package tool to use for build process artifacts"
+         configHcPkg (\v flags -> flags { configHcPkg = v })
+         (reqArgFlag "PATH")
 
       ,option [] ["compiler"] "compiler"
          configHcFlavor (\v flags -> flags { configHcFlavor = v })
@@ -647,6 +675,9 @@ emptyConfigFlags = mempty
 
 instance Monoid ConfigFlags where
   mempty = ConfigFlags {
+    configBuildHcFlavor = Flag GHC,
+    configBuildHcPkg    = mempty,
+    configBuildHc       = mempty,
     configPrograms      = error "FIXME: remove configPrograms",
     configProgramPaths  = mempty,
     configProgramArgs   = mempty,
@@ -690,6 +721,9 @@ instance Monoid ConfigFlags where
     configProgramPaths  = combine configProgramPaths,
     configProgramArgs   = combine configProgramArgs,
     configProgramPathExtra = combine configProgramPathExtra,
+    configBuildHcFlavor = combine configBuildHcFlavor,
+    configBuildHc       = combine configBuildHc,
+    configBuildHcPkg    = combine configBuildHcPkg,
     configHcFlavor      = combine configHcFlavor,
     configHcPath        = combine configHcPath,
     configHcPkg         = combine configHcPkg,

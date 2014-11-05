@@ -317,6 +317,7 @@ configure (pkg_descr0, pbi) cfg
           (flagToMaybe $ configHcFlavor cfg)
           (flagToMaybe $ configHcPath cfg) (flagToMaybe $ configHcPkg cfg)
           programsConfig (lessVerbose verbosity)
+
         let version = compilerVersion comp
             flavor  = compilerFlavor comp
 
@@ -593,6 +594,15 @@ configure (pkg_descr0, pbi) cfg
                   GHC.ghcDynamic comp
                 _ -> False
 
+        -- detect compiler for build process artifacts
+        (buildCompiler', buildCompPlatform', buildCompProgsCfg') <-
+          configCompilerEx
+          (flagToMaybe $ configBuildHcFlavor cfg)
+          (flagToMaybe $ configBuildHc cfg)
+          (flagToMaybe $ configBuildHcPkg cfg)
+          programsConfig
+          verbosity
+
         let lbi = LocalBuildInfo {
                     configFlags         = cfg,
                     extraConfigArgs     = [],  -- Currently configure does not
@@ -601,6 +611,9 @@ configure (pkg_descr0, pbi) cfg
                     installDirTemplates = installDirs,
                     compiler            = comp,
                     hostPlatform        = compPlatform,
+                    buildCompiler       = buildCompiler',
+                    buildCompPlatform   = buildCompPlatform',
+                    buildCompProgsCfg   = buildCompProgsCfg',
                     buildDir            = buildDir',
                     componentsConfigs   = buildComponents,
                     installedPkgs       = packageDependsIndex,

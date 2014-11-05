@@ -722,20 +722,26 @@ maybeReinstallAddSourceDeps verbosity numJobsFlag configFlags' globalFlags' = do
     mappendSomeSavedFlags :: ConfigFlags -> ConfigFlags -> ConfigFlags
     mappendSomeSavedFlags sandboxConfigFlags savedFlags =
       sandboxConfigFlags {
-        configHcFlavor     = configHcFlavor sandboxConfigFlags
-                             `mappend` configHcFlavor savedFlags,
-        configHcPath       = configHcPath sandboxConfigFlags
-                             `mappend` configHcPath savedFlags,
-        configHcPkg        = configHcPkg sandboxConfigFlags
-                             `mappend` configHcPkg savedFlags,
-        configProgramPaths = configProgramPaths sandboxConfigFlags
-                             `mappend` configProgramPaths savedFlags,
-        configProgramArgs  = configProgramArgs sandboxConfigFlags
-                             `mappend` configProgramArgs savedFlags,
+        configBuildHcFlavor = confiBuildgHcFlavor sandboxConfigFlags
+                              `mappend` configBuildHcFlavor savedFlags,
+        configBuildHcPath   = configBuildHcPath sandboxConfigFlags
+                              `mappend` configBuildHcPath savedFlags,
+        configBuildHcPkg    = configBuildHcPkg sandboxConfigFlags
+                              `mappend` configBuildHcPkg savedFlags,
+        configHcFlavor      = configHcFlavor sandboxConfigFlags
+                              `mappend` configHcFlavor savedFlags,
+        configHcPath        = configHcPath sandboxConfigFlags
+                              `mappend` configHcPath savedFlags,
+        configHcPkg         = configHcPkg sandboxConfigFlags
+                              `mappend` configHcPkg savedFlags,
+        configProgramPaths  = configProgramPaths sandboxConfigFlags
+                              `mappend` configProgramPaths savedFlags,
+        configProgramArgs   = configProgramArgs sandboxConfigFlags
+                              `mappend` configProgramArgs savedFlags,
         -- NOTE: Unconditionally choosing the value from
         -- 'dist/setup-config'. Sandbox package DB location may have been
         -- changed by 'configure -w'.
-        configPackageDBs   = configPackageDBs savedFlags
+        configPackageDBs    = configPackageDBs savedFlags
         -- FIXME: Is this compatible with the 'inherit' feature?
         }
 
