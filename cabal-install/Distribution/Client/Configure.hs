@@ -86,7 +86,7 @@ configure :: Verbosity
           -> IO ()
 configure verbosity packageDBs repos comp platform conf
   configFlags configExFlags extraArgs = do
-
+  -- TODO sh what about buildInstalledPkgIndex ??
   installedPkgIndex <- getInstalledPackages verbosity comp packageDBs conf
   sourcePkgDb       <- getSourcePackages    verbosity repos
 
@@ -99,7 +99,7 @@ configure verbosity packageDBs repos comp platform conf
   case maybePlan of
     Left message -> do
       info verbosity message
-      -- TODO
+      -- TODO sh
       setupWrapper verbosity (setupScriptOptions installedPkgIndex) Nothing
         configureCommand (const configFlags) extraArgs
 
@@ -118,8 +118,6 @@ configure verbosity packageDBs repos comp platform conf
     setupScriptOptions index = SetupScriptOptions {
       useCabalVersion  = chooseCabalVersion configExFlags
                          (flagToMaybe (configCabalVersion configExFlags)),
-      useCompiler      = Just comp,
-      usePlatform      = Just platform,
       usePackageDB     = packageDBs',
       usePackageIndex  = index',
       useProgramConfig = conf,
