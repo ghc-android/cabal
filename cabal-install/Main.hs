@@ -267,6 +267,7 @@ wrapperAction command verbosityFlag distPrefFlag =
                           (useDistPref defaultSetupScriptOptions)
                           (distPrefFlag flags)
         }
+    -- TODO sh
     setupWrapper verbosity setupScriptOptions Nothing
                  command (const flags) extraArgs
 
@@ -329,6 +330,7 @@ buildAction (buildFlags, buildExFlags) extraArgs globalFlags = do
 -- 'reconfigure' twice.
 build :: Verbosity -> SavedConfig -> FilePath -> BuildFlags -> [String] -> IO ()
 build verbosity config distPref buildFlags extraArgs =
+  -- TODO sh
   setupWrapper verbosity setupOptions Nothing
                (Cabal.buildCommand progConf) mkBuildFlags extraArgs
   where
@@ -394,6 +396,7 @@ replAction (replFlags, buildExFlags) extraArgs globalFlags = do
                                (const Nothing)
 
       maybeWithSandboxDirOnSearchPath useSandbox $
+        -- TODO sh
         setupWrapper verbosity setupOptions Nothing
         (Cabal.replCommand progConf) (const replFlags') extraArgs
 
@@ -628,6 +631,7 @@ installAction :: (ConfigFlags, ConfigExFlags, InstallFlags, HaddockFlags)
 installAction (configFlags, _, installFlags, _) _ _globalFlags
   | fromFlagOrDefault False (installOnly installFlags)
   = let verbosity = fromFlagOrDefault normal (configVerbosity configFlags)
+        -- TODO sh
     in setupWrapper verbosity defaultSetupScriptOptions Nothing
          installCommand (const mempty) []
 
@@ -741,6 +745,7 @@ testAction (testFlags, buildFlags, buildExFlags) extraArgs globalFlags = do
     build verbosity config distPref buildFlags' extraArgs'
 
   maybeWithSandboxDirOnSearchPath useSandbox $
+    -- TODO sh
     setupWrapper verbosity setupOptions Nothing
       Cabal.testCommand (const testFlags) extraArgs'
 
@@ -786,6 +791,7 @@ benchmarkAction (benchmarkFlags, buildFlags, buildExFlags)
     build verbosity config distPref buildFlags' extraArgs'
 
   maybeWithSandboxDirOnSearchPath useSandbox $
+    -- TODO sh
     setupWrapper verbosity setupOptions Nothing
       Cabal.benchmarkCommand (const benchmarkFlags) extraArgs'
 
@@ -800,11 +806,13 @@ haddockAction haddockFlags extraArgs globalFlags = do
                       (useDistPref defaultSetupScriptOptions)
                       (haddockDistPref haddockFlags')
         }
+  -- TODO sh
   setupWrapper verbosity setupScriptOptions Nothing
     haddockCommand (const haddockFlags') extraArgs
 
 cleanAction :: CleanFlags -> [String] -> GlobalFlags -> IO ()
 cleanAction cleanFlags extraArgs _globalFlags =
+  -- TODO sh
   setupWrapper verbosity setupScriptOptions Nothing
                cleanCommand (const cleanFlags) extraArgs
   where

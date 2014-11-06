@@ -59,6 +59,7 @@ sdist flags exflags = do
     -- Run 'setup sdist --output-directory=tmpDir' (or
     -- '--list-source'/'--output-directory=someOtherDir') in case we were passed
     -- those options.
+    -- TODO sh
     setupWrapper verbosity setupOpts (Just pkg) sdistCommand (const flags') []
 
     -- Unless we were given --list-sources or --output-directory ourselves,

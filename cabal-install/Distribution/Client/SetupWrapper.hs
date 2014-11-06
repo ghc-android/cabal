@@ -19,7 +19,8 @@ module Distribution.Client.SetupWrapper (
     setupWrapper,
     SetupScriptOptions(..),
     defaultSetupScriptOptions,
-    setupScriptOptionsFromLBI
+    fromLocalBuildInfo,
+    fromConfigFlags
   ) where
 
 import qualified Distribution.Make as Make
@@ -41,10 +42,8 @@ import Distribution.PackageDescription.Parse
          ( readPackageDescription )
 import Distribution.Simple.Configure
          ( configCompilerEx )
-import Distribution.Simple.LocalBuildInfo ( LocalBuildInfo(..) )
-import Distribution.Compiler ( buildCompilerId )
 import Distribution.Simple.Compiler
-         ( CompilerFlavor(GHC), Compiler(compilerId)
+         ( Compiler(compilerId)
          , PackageDB(..), PackageDBStack )
 import Distribution.Simple.PreProcess
          ( runSimplePreProcessor, ppUnlit )
@@ -65,12 +64,14 @@ import qualified Distribution.Simple.PackageIndex as PackageIndex
 import Distribution.Simple.PackageIndex (InstalledPackageIndex)
 import Distribution.Client.Config
          ( defaultCabalDir )
+import Distribution.Simple.LocalBuildInfo
+         ( LocalBuildInfo(..) )
 import Distribution.Client.IndexUtils
          ( getInstalledPackages )
 import Distribution.Client.JobControl
          ( Lock, criticalSection )
 import Distribution.Simple.Setup
-         ( Flag(..) )
+         ( Flag(..), flagToMaybe, ConfigFlags(..) )
 import Distribution.Simple.Utils
          ( die, debug, info, cabalVersion, tryFindPackageDesc, comparing
          , createDirectoryIfMissingVerbose, installExecutableFile
@@ -78,7 +79,7 @@ import Distribution.Simple.Utils
 import Distribution.Client.Utils
          ( inDir, tryCanonicalizePath
          , existsAndIsMoreRecentThan, moreRecentFile )
-import Distribution.System ( Platform(..), buildPlatform )
+import Distribution.System ( Platform(..) )
 import Distribution.Text
          ( display )
 import Distribution.Utils.NubList
@@ -112,8 +113,8 @@ import qualified System.Win32 as Win32
 
 data SetupScriptOptions = SetupScriptOptions {
     useCabalVersion          :: VersionRange,
-    useCompiler              :: Maybe Compiler,
-    usePlatform              :: Maybe Platform,
+    useCompiler              :: Compiler,
+    usePlatform              :: Platform,
     useProgramConfig         :: ProgramConfiguration,
     usePackageDB             :: PackageDBStack,
     usePackageIndex          :: Maybe InstalledPackageIndex,
@@ -143,12 +144,16 @@ data SetupScriptOptions = SetupScriptOptions {
     setupCacheLock           :: Maybe Lock
   }
 
-defaultSetupScriptOptions :: SetupScriptOptions
-defaultSetupScriptOptions = SetupScriptOptions {
+defaultSetupScriptOptions ::Compiler
+                          -> Platform
+                          -> ProgramConfiguration
+                          -> SetupScriptOptions
+defaultSetupScriptOptions comp platform progConf
+  = SetupScriptOptions {
     useCabalVersion          = anyVersion,
-    useCompiler              = Nothing,
-    usePlatform              = Nothing,
-    useProgramConfig         = emptyProgramConfiguration,
+    useCompiler              = comp,
+    usePlatform              = platform,
+    useProgramConfig         = progConf,
     usePackageDB             = [GlobalPackageDB, UserPackageDB],
     usePackageIndex          = Nothing,
     useDistPref              = defaultDistPref,
@@ -159,15 +164,22 @@ defaultSetupScriptOptions = SetupScriptOptions {
     setupCacheLock           = Nothing
   }
 
--- | Overwrite options regarding the compiler to use for @Setup.hs@
-setupScriptOptionsFromLBI :: LocalBuildInfo
-                          -> SetupScriptOptions
-                          -> SetupScriptOptions
-setupScriptOptionsFromLBI lbi opts =
-  opts { useCompiler = Just $ buildCompiler lbi
-       , usePlatform = Just $ buildCompPlatform lbi
-       , useProgramConfig = buildCompProgsCfg lbi
-       }
+fromLocalBuildInfo :: LocalBuildInfo -> SetupScriptOptions
+fromLocalBuildInfo lbi =
+  defaultSetupScriptOptions (buildCompiler lbi)
+                            (buildCompPlatform lbi)
+                            (buildCompProgsCfg lbi)
+
+fromConfigFlags :: Verbosity -> ConfigFlags -> IO SetupScriptOptions
+fromConfigFlags verbosity cfg = do
+  -- detect compiler for build process artifacts
+  (comp, platform, progCfg) <-
+          configCompilerEx (flagToMaybe $ configBuildHcFlavor cfg)
+                           (flagToMaybe $ configBuildHc cfg)
+                           (flagToMaybe $ configBuildHcPkg cfg)
+                           emptyProgramConfiguration
+                           verbosity
+  return $ defaultSetupScriptOptions comp platform progCfg
 
 setupWrapper :: Verbosity
              -> SetupScriptOptions
@@ -267,13 +279,19 @@ externalSetupMethod verbosity options pkg bt mkargs = do
 
   useCachedSetupExecutable = (bt == Simple || bt == Configure || bt == Make)
 
-  maybeGetInstalledPackages :: SetupScriptOptions -> Compiler
-                               -> ProgramConfiguration -> IO InstalledPackageIndex
-  maybeGetInstalledPackages options' comp conf =
+  maybeGetInstalledPackages :: SetupScriptOptions
+                            -> IO (InstalledPackageIndex, SetupScriptOptions)
+  maybeGetInstalledPackages options' =
+    -- Whenever we need to call configureInstalledPackages, we also need to access the
+    -- package index, so let's cache it here.
     case usePackageIndex options' of
-      Just index -> return index
-      Nothing    -> getInstalledPackages verbosity
-                    comp (usePackageDB options') conf
+      Just index -> return (index, options')
+      Nothing    -> do
+        index <- getInstalledPackages verbosity
+                                      (useCompiler options')
+                                      (usePackageDB options')
+                                      (useProgramConfig options')
+        return (index, options' { usePackageIndex = Just index })
 
   cabalLibVersionToUse :: IO (Version, (Maybe InstalledPackageId)
                              ,SetupScriptOptions)
@@ -307,8 +325,8 @@ externalSetupMethod verbosity options pkg bt mkargs = do
       installedVersion :: IO (Version, Maybe InstalledPackageId
                              ,SetupScriptOptions)
       installedVersion = do
-        (comp,    conf,    options')  <- configureCompiler options
-        (version, mipkgid, options'') <- installedCabalVersion options' comp conf
+        (_, options')  <- maybeGetInstalledPackages options
+        (version, mipkgid, options'') <- installedCabalVersion options'
         updateSetupScript version bt
         writeFile setupVersionFile (show version ++ "\n")
         return (version, mipkgid, options'')
@@ -350,15 +368,14 @@ externalSetupMethod verbosity options pkg bt mkargs = do
     Custom             -> error "buildTypeScript Custom"
     UnknownBuildType _ -> error "buildTypeScript UnknownBuildType"
 
-  installedCabalVersion :: SetupScriptOptions -> Compiler -> ProgramConfiguration
+  installedCabalVersion :: SetupScriptOptions
                         -> IO (Version, Maybe InstalledPackageId
                               ,SetupScriptOptions)
-  installedCabalVersion options' _ _ | packageName pkg == PackageName "Cabal" =
+  installedCabalVersion options' | packageName pkg == PackageName "Cabal" =
     return (packageVersion pkg, Nothing, options')
-  installedCabalVersion options' compiler conf = do
-    index <- maybeGetInstalledPackages options' compiler conf
-    let cabalDep   = Dependency (PackageName "Cabal") (useCabalVersion options')
-        options''  = options' { usePackageIndex = Just index }
+  installedCabalVersion options' = do
+    (index, options'') <- maybeGetInstalledPackages options'
+    let cabalDep   = Dependency (PackageName "Cabal") (useCabalVersion options'')
     case PackageIndex.lookupDependency index cabalDep of
       []   -> die $ "The package '" ++ display (packageName pkg)
                  ++ "' requires Cabal library version "
@@ -398,22 +415,6 @@ externalSetupMethod verbosity options pkg bt mkargs = do
                                _       -> False
           latestVersion    = version
 
-  configureCompiler :: SetupScriptOptions
-                    -> IO (Compiler, ProgramConfiguration, SetupScriptOptions)
-  configureCompiler options' = do
-    (comp, conf) <- case useCompiler options' of
-      Just comp -> return (comp, useProgramConfig options')
-      Nothing   -> do (comp, _, conf) <-
-                        configCompilerEx (Just GHC) Nothing Nothing
-                        (useProgramConfig options') verbosity
-                      return (comp, conf)
-    -- Whenever we need to call configureCompiler, we also need to access the
-    -- package index, so let's cache it here.
-    index <- maybeGetInstalledPackages options' comp conf
-    return (comp, conf, options' { useCompiler      = Just comp,
-                                   usePackageIndex  = Just index,
-                                   useProgramConfig = conf })
-
   -- | Path to the setup exe cache directory and path to the cached setup
   -- executable.
   cachedSetupDirAndProg :: SetupScriptOptions -> Version
@@ -431,11 +432,8 @@ externalSetupMethod verbosity options pkg bt mkargs = do
       where
         buildTypeString       = show bt
         cabalVersionString    = "Cabal-" ++ (display cabalLibVersion)
-        compilerVersionString = display $
-                                fromMaybe buildCompilerId
-                                (fmap compilerId . useCompiler $ options')
-        platformString        = display $
-                                fromMaybe buildPlatform (usePlatform options')
+        compilerVersionString = display $ compilerId $ useCompiler options'
+        platformString        = display $ usePlatform options'
 
   -- | Look up the setup executable in the cache; update the cache if the setup
   -- executable is not found.
@@ -480,9 +478,8 @@ externalSetupMethod verbosity options pkg bt mkargs = do
     let outOfDate = setupHsNewer || cabalVersionNewer
     when (outOfDate || forceCompile) $ do
       debug verbosity "Setup executable needs to be updated, compiling..."
-      (compiler, conf, options'') <- configureCompiler options'
       let cabalPkgid = PackageIdentifier (PackageName "Cabal") cabalLibVersion
-      let ghcOptions = mempty {
+          ghcOptions = mempty {
               ghcOptVerbosity       = Flag verbosity
             , ghcOptMode            = Flag GhcModeMake
             , ghcOptInputFiles      = toNubListR [setupHs]
@@ -491,13 +488,15 @@ externalSetupMethod verbosity options pkg bt mkargs = do
             , ghcOptHiDir           = Flag setupDir
             , ghcOptSourcePathClear = Flag True
             , ghcOptSourcePath      = toNubListR [workingDir]
-            , ghcOptPackageDBs      = usePackageDB options''
+            , ghcOptPackageDBs      = usePackageDB options'
             , ghcOptPackages        = toNubListR $
                 maybe [] (\ipkgid -> [(ipkgid, cabalPkgid, defaultRenaming)])
                 maybeCabalLibInstalledPkgId
             , ghcOptExtra           = toNubListR ["-threaded"]
             }
-      let ghcCmdLine = renderGhcOptions compiler ghcOptions
+          conf = useProgramConfig options'
+          comp = useCompiler options'
+          ghcCmdLine = renderGhcOptions comp ghcOptions
       case useLoggingHandle options of
         Nothing          -> runDbProgram verbosity ghcProgram conf ghcCmdLine
 

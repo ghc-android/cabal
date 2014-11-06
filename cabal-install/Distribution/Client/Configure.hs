@@ -99,6 +99,7 @@ configure verbosity packageDBs repos comp platform conf
   case maybePlan of
     Left message -> do
       info verbosity message
+      -- TODO
       setupWrapper verbosity (setupScriptOptions installedPkgIndex) Nothing
         configureCommand (const configFlags) extraArgs
 
@@ -224,6 +225,7 @@ configurePackage :: Verbosity
 configurePackage verbosity platform comp scriptOptions configFlags
   (ReadyPackage (SourcePackage _ gpkg _ _) flags stanzas deps) extraArgs =
 
+  -- TODO sh
   setupWrapper verbosity
     scriptOptions (Just pkg) configureCommand configureFlags extraArgs
 

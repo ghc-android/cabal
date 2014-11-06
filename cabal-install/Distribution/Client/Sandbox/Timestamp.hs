@@ -231,6 +231,7 @@ allPackageSourceFiles verbosity packageDir = inDir (Just packageDir) $ do
 
       doListSources :: IO [FilePath]
       doListSources = do
+        -- TODO sh
         setupWrapper verbosity setupOpts (Just pkg) sdistCommand (const flags) []
         srcs <- fmap lines . readFile $ file
         mapM tryCanonicalizePath srcs

@@ -1468,6 +1468,7 @@ installUnpackedPackage verbosity buildLimit installLock numJobs pkg_key
              (\path -> Just `fmap` openFile path AppendMode) mLogPath)
       (maybe (return ()) hClose)
       (\logFileHandle ->
+        -- TODO
         setupWrapper verbosity
           scriptOptions { useLoggingHandle = logFileHandle
                         , useWorkingDir    = workingDir }

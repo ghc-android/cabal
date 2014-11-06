@@ -108,16 +108,16 @@ data LocalBuildInfo = LocalBuildInfo {
                 -- ^ The compiler we're building with
         hostPlatform  :: Platform,
                 -- ^ The platform we're building for
-        buildCompiler       :: Compiler,
+        buildCompiler :: Compiler,
                 -- ^ The compiler to build /build/ artifacts, like @Setup.hs@
-        buildCompPlatform   :: Platform,
+        buildCompPlatform :: Platform,
                 -- ^ The platform we're building /build/ artifacts __on__
-        buildCompProgsCfg   :: ProgramConfiguration,
+        buildCompProgsCfg :: ProgramConfiguration,
                 -- ^ Location and args of programs needed to build /build/
                 -- artifacts
         buildDir      :: FilePath,
                 -- ^ Where to build the package.
-        componentsConfigs   :: [(ComponentName, ComponentLocalBuildInfo, [ComponentName])],
+        componentsConfigs :: [(ComponentName, ComponentLocalBuildInfo, [ComponentName])],
                 -- ^ All the components to build, ordered by topological sort, and with their dependencies
                 -- over the intrapackage dependency graph
         installedPkgs :: InstalledPackageIndex,
