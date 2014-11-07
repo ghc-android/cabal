@@ -385,17 +385,17 @@ configureOptions showOrParseArgs =
          configDistPref (\d flags -> flags { configDistPref = d })
          showOrParseArgs
 
-      ,option [] ["build-compiler"]
+      ,option [] ["build-compiler-flavor"]
          "compiler-flavour for build process artifacts such as 'Setup.hs'"
          configBuildHcFlavor (\v flags -> flags { configBuildHcFlavor = v })
          (choiceOpt [ (Flag GHC, ("g", ["ghc"]), "compile with GHC") ])
 
-      ,option [] ["with-build-compiler"]
+      ,option [] ["build-compiler-path"]
          "path to compiler for build process artifacts such as 'Setup.hs'"
          configHcPath (\v flags -> flags { configHcPath = v })
          (reqArgFlag "PATH")
 
-      ,option [] ["with-build-hc-pkg"]
+      ,option [] ["build-hc-pkg-path"]
          "path to the package tool to use for build process artifacts"
          configHcPkg (\v flags -> flags { configHcPkg = v })
          (reqArgFlag "PATH")
