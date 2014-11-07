@@ -122,7 +122,8 @@ configure verbosity packageDBs repos comp platform conf
       usePackageIndex  = index',
       useProgramConfig = conf,
       useDistPref      = fromFlagOrDefault
-                           (useDistPref defaultSetupScriptOptions)
+                           -- TODO sh remove undefined
+                           (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                            (configDistPref configFlags),
       useLoggingHandle = Nothing,
       useWorkingDir    = Nothing,

@@ -1003,14 +1003,17 @@ performInstallations verbosity
     numJobs         = determineNumJobs (installNumJobs installFlags)
     numFetchJobs    = 2
     parallelInstall = numJobs >= 2
-    distPref        = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+    -- TODO sh provide a useDistPref default
+    -- TODO sh remove undefined
+    distPref        = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                       (configDistPref configFlags)
 
     setupScriptOptions index lock = SetupScriptOptions {
       useCabalVersion  = chooseCabalVersion configExFlags
                          (libVersion miscOptions),
-      useCompiler      = Just comp,
-      usePlatform      = Just platform,
+      -- TODO sh set build compiler
+      useCompiler      = comp,
+      usePlatform      = platform,
       -- Hack: we typically want to allow the UserPackageDB for finding the
       -- Cabal lib when compiling any Setup.hs even if we're doing a global
       -- install. However we also allow looking in a specific package db.

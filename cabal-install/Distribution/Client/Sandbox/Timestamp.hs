@@ -224,7 +224,8 @@ allPackageSourceFiles verbosity packageDir = inDir (Just packageDir) $ do
                                   then lessVerbose verbosity else verbosity,
         sDistListSources = Flag file
         }
-      setupOpts = defaultSetupScriptOptions {
+                  -- TODO sh remove 'undefined'
+      setupOpts = (defaultSetupScriptOptions undefined undefined undefined) {
         -- 'sdist --list-sources' was introduced in Cabal 1.18.
         useCabalVersion = orLaterVersion $ Version [1,18,0] []
         }
