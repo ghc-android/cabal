@@ -79,6 +79,7 @@ import Distribution.Simple.Configure          ( configCompilerAuxEx
 import Distribution.Simple.PreProcess         ( knownSuffixHandlers )
 import Distribution.Simple.Program            ( ProgramConfiguration )
 import Distribution.Simple.Setup              ( Flag(..), HaddockFlags(..)
+                                              , ConfigFlags(..)
                                               , fromFlagOrDefault )
 import Distribution.Simple.SrcDist            ( prepareTree )
 import Distribution.Simple.Utils              ( die, debug, notice, info, warn
@@ -722,10 +723,10 @@ maybeReinstallAddSourceDeps verbosity numJobsFlag configFlags' globalFlags' = do
     mappendSomeSavedFlags :: ConfigFlags -> ConfigFlags -> ConfigFlags
     mappendSomeSavedFlags sandboxConfigFlags savedFlags =
       sandboxConfigFlags {
-        configBuildHcFlavor = confiBuildgHcFlavor sandboxConfigFlags
+        configBuildHcFlavor = configBuildHcFlavor sandboxConfigFlags
                               `mappend` configBuildHcFlavor savedFlags,
-        configBuildHcPath   = configBuildHcPath sandboxConfigFlags
-                              `mappend` configBuildHcPath savedFlags,
+        configBuildHc       = configBuildHc sandboxConfigFlags
+                              `mappend` configBuildHc savedFlags,
         configBuildHcPkg    = configBuildHcPkg sandboxConfigFlags
                               `mappend` configBuildHcPkg savedFlags,
         configHcFlavor      = configHcFlavor sandboxConfigFlags

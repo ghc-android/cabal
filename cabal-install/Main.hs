@@ -262,9 +262,10 @@ wrapperAction command verbosityFlag distPrefFlag =
   commandAddAction command
     { commandDefaultFlags = mempty } $ \flags extraArgs _globalFlags -> do
     let verbosity = fromFlagOrDefault normal (verbosityFlag flags)
-        setupScriptOptions = defaultSetupScriptOptions {
+        setupScriptOptions = (defaultSetupScriptOptions undefined undefined undefined) {
           useDistPref = fromFlagOrDefault
-                          (useDistPref defaultSetupScriptOptions)
+                          -- TODO sh remove undefined
+                          (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                           (distPrefFlag flags)
         }
     -- TODO sh
@@ -309,7 +310,8 @@ configureAction (configFlags, configExFlags) extraArgs globalFlags = do
 
 buildAction :: (BuildFlags, BuildExFlags) -> [String] -> GlobalFlags -> IO ()
 buildAction (buildFlags, buildExFlags) extraArgs globalFlags = do
-  let distPref    = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+  -- TODO sh remove undefined
+  let distPref    = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                     (buildDistPref buildFlags)
       verbosity   = fromFlagOrDefault normal (buildVerbosity buildFlags)
       noAddSource = fromFlagOrDefault DontSkipAddSourceDepsCheck
@@ -335,7 +337,8 @@ build verbosity config distPref buildFlags extraArgs =
                (Cabal.buildCommand progConf) mkBuildFlags extraArgs
   where
     progConf     = defaultProgramConfiguration
-    setupOptions = defaultSetupScriptOptions { useDistPref = distPref }
+    -- TODO sh remove undefined
+    setupOptions = (defaultSetupScriptOptions undefined undefined undefined) { useDistPref = distPref }
 
     mkBuildFlags version = filterBuildFlags version config buildFlags'
     buildFlags' = buildFlags
@@ -374,14 +377,16 @@ replAction (replFlags, buildExFlags) extraArgs globalFlags = do
     -- There is a .cabal file in the current directory: start a REPL and load
     -- the project's modules.
     onPkgDesc = do
-      let distPref    = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+      -- TODO sh remove undefined
+      let distPref    = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                         (replDistPref replFlags)
           noAddSource = case replReload replFlags of
             Flag True -> SkipAddSourceDepsCheck
             _         -> fromFlagOrDefault DontSkipAddSourceDepsCheck
                          (buildOnly buildExFlags)
           progConf     = defaultProgramConfiguration
-          setupOptions = defaultSetupScriptOptions
+          -- TODO sh remove undefined
+          setupOptions = (defaultSetupScriptOptions undefined undefined undefined)
             { useCabalVersion = orLaterVersion $ Version [1,18,0] []
             , useDistPref     = distPref
             }
@@ -570,7 +575,8 @@ reconfigure verbosity distPref     addConfigFlags extraArgs globalFlags
 
     determineMessageToShow lbi configFlags depsReinstalled False False = do
       let savedDistPref = fromFlagOrDefault
-                          (useDistPref defaultSetupScriptOptions)
+                          -- TODO sh remove undefined
+                          (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                           (configDistPref configFlags)
       case depsReinstalled of
         ReinstalledSomeDeps ->
@@ -631,8 +637,8 @@ installAction :: (ConfigFlags, ConfigExFlags, InstallFlags, HaddockFlags)
 installAction (configFlags, _, installFlags, _) _ _globalFlags
   | fromFlagOrDefault False (installOnly installFlags)
   = let verbosity = fromFlagOrDefault normal (configVerbosity configFlags)
-        -- TODO sh
-    in setupWrapper verbosity defaultSetupScriptOptions Nothing
+        -- TODO sh remove undefined
+    in setupWrapper verbosity (defaultSetupScriptOptions undefined undefined undefined) Nothing
          installCommand (const mempty) []
 
 installAction (configFlags, configExFlags, installFlags, haddockFlags)
@@ -710,9 +716,11 @@ testAction :: (TestFlags, BuildFlags, BuildExFlags) -> [String] -> GlobalFlags
               -> IO ()
 testAction (testFlags, buildFlags, buildExFlags) extraArgs globalFlags = do
   let verbosity      = fromFlagOrDefault normal (testVerbosity testFlags)
-      distPref       = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+      -- TODO sh remove undefined
+      distPref       = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                        (testDistPref testFlags)
-      setupOptions   = defaultSetupScriptOptions { useDistPref = distPref }
+      -- TODO sh remove undefined
+      setupOptions   = (defaultSetupScriptOptions undefined undefined undefined) { useDistPref = distPref }
       buildFlags'    = buildFlags { buildVerbosity = testVerbosity testFlags
                                   , buildDistPref  = testDistPref testFlags }
       addConfigFlags = mempty { configTests = toFlag True }
@@ -755,9 +763,10 @@ benchmarkAction (benchmarkFlags, buildFlags, buildExFlags)
                 extraArgs globalFlags = do
   let verbosity      = fromFlagOrDefault normal
                        (benchmarkVerbosity benchmarkFlags)
-      distPref       = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+      -- TODO sh remove indefined
+      distPref       = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                        (benchmarkDistPref benchmarkFlags)
-      setupOptions   = defaultSetupScriptOptions { useDistPref = distPref }
+      setupOptions   = (defaultSetupScriptOptions  undefined undefined undefined) { useDistPref = distPref }
       buildFlags'    = buildFlags
         { buildVerbosity = benchmarkVerbosity benchmarkFlags
         , buildDistPref  = benchmarkDistPref  benchmarkFlags }
@@ -800,9 +809,11 @@ haddockAction haddockFlags extraArgs globalFlags = do
   (_useSandbox, config) <- loadConfigOrSandboxConfig verbosity globalFlags mempty
   let haddockFlags' = defaultHaddockFlags      `mappend`
                       savedHaddockFlags config `mappend` haddockFlags
-      setupScriptOptions = defaultSetupScriptOptions {
+      -- TODO sh remove undefined
+      setupScriptOptions = (defaultSetupScriptOptions undefined undefined undefined) {
         useDistPref = fromFlagOrDefault
-                      (useDistPref defaultSetupScriptOptions)
+                      -- TODO sh remove undefined
+                      (useDistPref (defaultSetupScriptOptions undefined undefined undefined))
                       (haddockDistPref haddockFlags')
         }
   -- TODO sh
@@ -816,9 +827,10 @@ cleanAction cleanFlags extraArgs _globalFlags =
                cleanCommand (const cleanFlags) extraArgs
   where
     verbosity = fromFlagOrDefault normal (cleanVerbosity cleanFlags)
-    setupScriptOptions = defaultSetupScriptOptions {
+    -- TODO sh remove undefined
+    setupScriptOptions = (defaultSetupScriptOptions undefined undefined undefined) {
       useDistPref = fromFlagOrDefault
-                    (useDistPref defaultSetupScriptOptions)
+                    (useDistPref (defaultSetupScriptOptions undefined undefined undefined))
                     (cleanDistPref cleanFlags),
       useWin32CleanHack = True
       }
@@ -992,7 +1004,8 @@ reportAction reportFlags extraArgs globalFlags = do
 runAction :: (BuildFlags, BuildExFlags) -> [String] -> GlobalFlags -> IO ()
 runAction (buildFlags, buildExFlags) extraArgs globalFlags = do
   let verbosity   = fromFlagOrDefault normal (buildVerbosity buildFlags)
-      distPref    = fromFlagOrDefault (useDistPref defaultSetupScriptOptions)
+      -- TODO sh remove undefined
+      distPref    = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                     (buildDistPref buildFlags)
       noAddSource = fromFlagOrDefault DontSkipAddSourceDepsCheck
                     (buildOnly buildExFlags)
