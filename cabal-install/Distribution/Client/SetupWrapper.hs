@@ -71,7 +71,7 @@ import Distribution.Client.IndexUtils
 import Distribution.Client.JobControl
          ( Lock, criticalSection )
 import Distribution.Simple.Setup
-         ( Flag(..), flagToMaybe, ConfigFlags(..) )
+         ( Flag(..), flagToMaybe, ConfigFlags(..), buildCompilerFlavor)
 import Distribution.Simple.Utils
          ( die, debug, info, cabalVersion, tryFindPackageDesc, comparing
          , createDirectoryIfMissingVerbose, installExecutableFile
@@ -174,7 +174,7 @@ fromConfigFlags :: Verbosity -> ConfigFlags -> IO SetupScriptOptions
 fromConfigFlags verbosity cfg = do
   -- detect compiler for build process artifacts
   (comp, platform, progCfg) <-
-          configCompilerEx (flagToMaybe $ configBuildHcFlavor cfg)
+          configCompilerEx (Just buildCompilerFlavor)
                            (flagToMaybe $ configBuildHc cfg)
                            (flagToMaybe $ configBuildHcPkg cfg)
                            emptyProgramConfiguration

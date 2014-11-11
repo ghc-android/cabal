@@ -35,7 +35,7 @@ module Distribution.Simple.Setup (
 
   GlobalFlags(..),   emptyGlobalFlags,   defaultGlobalFlags,   globalCommand,
   ConfigFlags(..),   emptyConfigFlags,   defaultConfigFlags,   configureCommand,
-  configAbsolutePaths, readPackageDbList, showPackageDbList,
+  configAbsolutePaths, readPackageDbList, showPackageDbList, buildCompilerFlavor,
   CopyFlags(..),     emptyCopyFlags,     defaultCopyFlags,     copyCommand,
   InstallFlags(..),  emptyInstallFlags,  defaultInstallFlags,  installCommand,
   HaddockFlags(..),  emptyHaddockFlags,  defaultHaddockFlags,  haddockCommand,
@@ -250,10 +250,6 @@ instance Monoid GlobalFlags where
 
 -- | Flags to @configure@ command
 data ConfigFlags = ConfigFlags {
-    configBuildHcFlavor :: Flag CompilerFlavor, -- ^\"Flavor\" of the build
-                                                -- compiler specified by
-                                                -- 'configBuildHcPath'. Currently
-                                                -- only GHC is viable.
     configBuildHc       :: Flag FilePath, -- ^Location of the compiler to use to
                                           -- build helper programs required by
                                           -- the build process itself, e.g. to
@@ -384,11 +380,6 @@ configureOptions showOrParseArgs =
       ,optionDistPref
          configDistPref (\d flags -> flags { configDistPref = d })
          showOrParseArgs
-
-      ,option [] ["build-compiler-flavor"]
-         "compiler-flavour for build process artifacts such as 'Setup.hs'"
-         configBuildHcFlavor (\v flags -> flags { configBuildHcFlavor = v })
-         (choiceOpt [ (Flag GHC, ("g", ["ghc"]), "compile with GHC") ])
 
       ,option [] ["build-compiler-path"]
          "path to compiler for build process artifacts such as 'Setup.hs'"
@@ -600,6 +591,8 @@ showPackageDbList = map showPackageDb
     showPackageDb (Just UserPackageDB)          = "user"
     showPackageDb (Just (SpecificPackageDB db)) = db
 
+buildCompilerFlavor :: CompilerFlavor
+buildCompilerFlavor = GHC
 
 parseDependency :: Parse.ReadP r (PackageName, InstalledPackageId)
 parseDependency = do
@@ -675,7 +668,6 @@ emptyConfigFlags = mempty
 
 instance Monoid ConfigFlags where
   mempty = ConfigFlags {
-    configBuildHcFlavor = Flag GHC,
     configBuildHcPkg    = mempty,
     configBuildHc       = mempty,
     configPrograms      = error "FIXME: remove configPrograms",
@@ -721,7 +713,6 @@ instance Monoid ConfigFlags where
     configProgramPaths  = combine configProgramPaths,
     configProgramArgs   = combine configProgramArgs,
     configProgramPathExtra = combine configProgramPathExtra,
-    configBuildHcFlavor = combine configBuildHcFlavor,
     configBuildHc       = combine configBuildHc,
     configBuildHcPkg    = combine configBuildHcPkg,
     configHcFlavor      = combine configHcFlavor,

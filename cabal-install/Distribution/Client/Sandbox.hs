@@ -723,8 +723,6 @@ maybeReinstallAddSourceDeps verbosity numJobsFlag configFlags' globalFlags' = do
     mappendSomeSavedFlags :: ConfigFlags -> ConfigFlags -> ConfigFlags
     mappendSomeSavedFlags sandboxConfigFlags savedFlags =
       sandboxConfigFlags {
-        configBuildHcFlavor = configBuildHcFlavor sandboxConfigFlags
-                              `mappend` configBuildHcFlavor savedFlags,
         configBuildHc       = configBuildHc sandboxConfigFlags
                               `mappend` configBuildHc savedFlags,
         configBuildHcPkg    = configBuildHcPkg sandboxConfigFlags

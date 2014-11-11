@@ -28,6 +28,7 @@ Extra-Source-Files:
 
   -- Generated with '../Cabal/misc/gen-extra-source-files.sh | sort'
   tests/PackageTests/Freeze/my.cabal
+  tests/PackageTests/CustomBuildCompiler/ConfigFileEntries/my.cabal
 
 source-repository head
   type:     git
@@ -233,7 +234,7 @@ test-suite package-tests
     PackageTests.Exec.Check
     PackageTests.Freeze.Check
     PackageTests.MultipleSource.Check
-    PackageTests.CustomBuildCompiler.Group
+    PackageTests.CustomBuildCompiler.Check
     PackageTests.PackageTester
   build-depends:
     Cabal,

@@ -23,6 +23,7 @@ module PackageTests.PackageTester
     , cabal_clean
     , cabal_exec
     , cabal_freeze
+    , cabal_configure
     , cabal_install
     , cabal_sandbox
     , run
@@ -32,6 +33,7 @@ module PackageTests.PackageTester
     , assertExecFailed
     , assertExecSucceeded
     , assertFreezeSucceeded
+    , assertConfigureSucceeded
     , assertInstallSucceeded
     , assertSandboxSucceeded
     ) where
@@ -55,7 +57,7 @@ import Distribution.ReadE (readEOrFail)
 import Distribution.Verbosity (Verbosity, flagToVerbosity, normal)
 
 data Success = Failure
-             -- | ConfigureSuccess
+             | ConfigureSuccess
              -- | BuildSuccess
              -- | TestSuccess
              -- | BenchSuccess
@@ -105,6 +107,13 @@ cabal_freeze :: FilePath -> [String] -> FilePath -> IO Result
 cabal_freeze dir args cabalPath = do
     res <- cabal dir (["freeze"] ++ args) cabalPath
     return $ recordRun res FreezeSuccess nullResult
+
+-- | Run the configure command and return its result.
+cabal_configure :: FilePath -> [String] -> [String] -> FilePath -> IO Result
+cabal_configure dir globalArgs configureArgs cabalPath = do
+    let args = globalArgs ++ ["configure"] ++ configureArgs
+    res <- cabal dir args cabalPath
+    return $ recordRun res ConfigureSuccess nullResult
 
 -- | Run the install command and return its result.
 cabal_install :: FilePath -> [String] -> FilePath -> IO Result
@@ -177,6 +186,12 @@ assertFreezeSucceeded :: Result -> Assertion
 assertFreezeSucceeded result = unless (successful result) $
     assertFailure $
     "expected: \'cabal freeze\' should succeed\n" ++
+    "  output: " ++ outputText result
+
+assertConfigureSucceeded :: Result -> Assertion
+assertConfigureSucceeded result = unless (successful result) $
+    assertFailure $
+    "expected: \'cabal configure\' should succeed\n" ++
     "  output: " ++ outputText result
 
 assertInstallSucceeded :: Result -> Assertion

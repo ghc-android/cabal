@@ -85,8 +85,8 @@ import Distribution.Simple.Program
     , lookupProgram, requireProgram, requireProgramVersion
     , pkgConfigProgram, gccProgram, rawSystemProgramStdoutConf )
 import Distribution.Simple.Setup
-    ( ConfigFlags(..), CopyDest(..), Flag(..), fromFlag, fromFlagOrDefault
-    , flagToMaybe )
+    ( ConfigFlags(..), buildCompilerFlavor,
+      CopyDest(..), Flag(..), fromFlag, fromFlagOrDefault, flagToMaybe )
 import Distribution.Simple.InstallDirs
     ( InstallDirs(..), defaultInstallDirs, combineInstallDirs )
 import Distribution.Simple.LocalBuildInfo
@@ -597,7 +597,7 @@ configure (pkg_descr0, pbi) cfg
         -- detect compiler for build process artifacts
         (buildCompiler', buildCompPlatform', buildCompProgsCfg') <-
           configCompilerEx
-          (flagToMaybe $ configBuildHcFlavor cfg)
+          (Just buildCompilerFlavor)
           (flagToMaybe $ configBuildHc cfg)
           (flagToMaybe $ configBuildHcPkg cfg)
           programsConfig
