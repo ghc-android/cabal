@@ -15,7 +15,7 @@ import           System.FilePath ((</>))
 
 test :: FilePath -> Test
 test cabalPath =
-  testGroup "ConfigFileEntries"
+  testGroup "CustomBuildCompiler"
   [ testCase "generate cabal config file entries for build compiler" $
     withNewCabalConfigFile $ \ cfgFile -> do
       cabal_configure ["--config-file=" ++ cfgFile] []
@@ -31,7 +31,7 @@ test cabalPath =
       result <- cabal_configure ["--config-file=" ++ cfgFile] []
       PT.assertConfigureSucceeded result
       buildCompilerMarkerString `isInfixOf` (PT.outputText result)
-        @? "should have used the build compiler settings from config file"
+        @? "should have used the build compiler defined in the config file"
   ]
   where
     cabal_configure globalArgs configureArgs =
