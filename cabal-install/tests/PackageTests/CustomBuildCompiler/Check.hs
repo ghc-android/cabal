@@ -7,30 +7,32 @@ import           Test.Framework.Providers.HUnit (testCase)
 import           Test.HUnit ((@?), Assertion )
 
 import           Control.Applicative ((<$>))
-import           Control.Exception (bracket)
+import           Control.Exception (bracket, try)
 import           Control.Monad (when)
 import           Data.List (isInfixOf)
-import           System.Directory (doesFileExist, removeFile)
+import           System.Directory (removeDirectoryRecursive, createDirectory, doesDirectoryExist)
 import           System.FilePath ((</>))
 
 test :: FilePath -> Test
 test cabalPath =
   testGroup "CustomBuildCompiler"
   [ testCase "generate cabal config file entries for build compiler" $
-    withNewCabalConfigFile $ \ cfgFile -> do
+    withEmptyTestDir $ do
+      let cfgFile = testDir </> "test-config"
       cabal_configure ["--config-file=" ++ cfgFile] []
         >>= PT.assertConfigureSucceeded
       assertLineInFile "-- build-compiler-path:" (dir </> cfgFile)
       assertLineInFile "-- build-hc-pkg-path:" (dir </> cfgFile)
 
   , testCase "use the build compiler defined in the config file" $
-    withNewCabalConfigFile $ \ cfgFile -> do
-      cfgHead <- readFile configFileTemplate
-      let cfg = cfgHead ++ "\nbuild-compiler-path: " ++ testBuildCompiler ++ "\n"
+    withEmptyTestDir $ do
+      let cfgFile = testDir </> "test-config"
+          cfg = configFileHead ++ "\nbuild-compiler-path: " ++ testBuildCompiler ++ "\n"
       writeFile (dir </> cfgFile) cfg
       result <- cabal_configure ["--config-file=" ++ cfgFile] []
       PT.assertConfigureSucceeded result
-      buildCompilerMarkerString `isInfixOf` (PT.outputText result)
+      markerFileContent <- readFile markerFile
+      buildCompilerMarkerString `isInfixOf` markerFileContent
         @? "should have used the build compiler defined in the config file"
   ]
   where
@@ -40,11 +42,24 @@ test cabalPath =
 dir :: FilePath
 dir = "PackageTests" </> "CustomBuildCompiler"
 
-configFileTemplate :: FilePath
-configFileTemplate = dir </> "with-custom-build-compiler.cfg"
+testDir :: FilePath
+testDir = "test-dir"
+
+configFileHead :: FilePath
+configFileHead =
+  "remote-repo: hackage.haskell.org:http://hackage.haskell.org/packages/archive\n\
+  \remote-repo-cache: /home/sven/.cabal/packages\n\
+  \world-file: /home/sven/.cabal/world\n\
+  \extra-prog-path: /home/sven/.cabal/bin\n\
+  \build-summary: /home/sven/.cabal/logs/build.log\n\
+  \remote-build-reporting: anonymous\n\
+  \jobs: $ncpus\n\n"
 
 testBuildCompiler :: FilePath
-testBuildCompiler = dir </> "test-build-compiler.sh"
+testBuildCompiler = "./test-build-compiler.sh"
+
+markerFile :: FilePath
+markerFile = "TEST_BUILD_COMPILER_MARKER"
 
 buildCompilerMarkerString :: String
 buildCompilerMarkerString = "%% CUSTOM BUILD COMPILER USED %%"
@@ -54,11 +69,12 @@ assertLineInFile needle file =
   elem needle . lines <$> readFile file
   @? "File: \"" ++ file ++ "\" should have contained a line: \""++needle++"\""
 
-withNewCabalConfigFile :: (FilePath -> IO a) -> IO a
-withNewCabalConfigFile =
-  bracket (cfgFile >>= ensureAbsent) (removeFile . (dir </>))
-  where cfgFile = return "test-config"
-        ensureAbsent cfgFile' = do
-          fileExists <- doesFileExist $ dir </> cfgFile'
-          when fileExists $ removeFile $ dir </> cfgFile'
-          return cfgFile'
+withEmptyTestDir :: IO a -> IO a
+withEmptyTestDir =
+  bracket createTestDir removeDirectoryRecursive . const
+  where
+    createTestDir = do
+      let testDirCwd = dir </> testDir
+      doesDirectoryExist testDirCwd >>= flip when (removeDirectoryRecursive testDirCwd)
+      createDirectory testDirCwd
+      return testDirCwd
