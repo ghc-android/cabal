@@ -17,56 +17,53 @@ import           System.Directory ( canonicalizePath
                                   , doesDirectoryExist )
 import           System.FilePath ((</>))
 
--- TODO sh: There is a big problem (due to the fact that the cabal design suck
---          generally at this) there is a assymetric somewhat redundant split
---          between Setup.hs compilation and and the rest, well wtf whatever,
---          this results in Setup.hs not being linked to the (sandboxed?) local
---          Cabal lib. Solution: Split this test in tests for control flow only
---          until Setup.hs is compiled with the right compiler and invoked with
---          the provided flags, and test starting from
---          'Distribution.Simple.defaultMain'. Setup.hs in this project does not
---          invoke 'defaultMain', it merely asserts that stuff is correct.  The
---          second part of the tests is to be placed in Cabal's test suite, not
---          in cabal-install's test suite. These tests start by calling
---          defaultMain and go from there.
+-- TODO sh: Split this test in tests for the compilation and invokation of
+-- Setup.hs, and test starting from 'Distribution.Simple.defaultMain'. The
+-- 'Setup.hs' contained in this test does not invoke 'defaultMain', it merely
+-- asserts that the options are correct. The other tests belong to Cabal's test
+-- suite, not in cabal-install's test suite, and start by calling defaultMain
+-- and go from there.
+
+-- TODO sh: Add a build type 'Simple' test project.
 
 
 test :: FilePath -> Test
 test cabalPath =
   testGroup "CustomBuildCompiler"
-  [ testCase "Add setup compiler options to newly generated ~/.cabal/config" $
+  [ testCase
+    "Add default setup compiler options to newly generated ~/.cabal/config" $
     withEmptyTestDir $ do
-      let cfgFile = testDir </> "test-config"
-      _ <- cabal_configure ["--config-file=" ++ cfgFile] []
-      assertLineInFile "-- build-compiler-path:" (dir </> cfgFile)
-      assertLineInFile "-- build-hc-pkg-path:" (dir </> cfgFile)
+      _ <- cabal_configure []
+      assertLineInFile "-- build-compiler-path:" (dir </> cabalConfigFile)
+      assertLineInFile "-- build-hc-pkg-path:" (dir </> cabalConfigFile)
 
-  , testCase "Read setup compiler options from ~/.cabal/config" $
+  , testCase
+    "Pass setup compiler options from ~/.cabal/config to 'Setup.hs'" $
     withEmptyTestDir $ do
-      testBuildCompilerAbs <- canonicalizePath $ dir </> testBuildCompiler
-      let cfgFile = testDir </> "test-config"
-          cfg = configFileHead
-                ++ "\nbuild-compiler-path: " ++ testBuildCompilerAbs
-                ++ "\n"
-      writeFile (dir </> cfgFile) cfg
-      cabal_configure ["--config-file=" ++ cfgFile] []
-        >>= PT.assertConfigureSucceeded
-      markerFileContent <- readFile markerFile
-      buildCompilerMarkerString `isInfixOf` markerFileContent
-        @? "should have used the build compiler defined in the config file"
+      writeFile (dir </> cabalConfigFile) cabalConfigCustomSetup
+      res <- cabal_configure []
+      PT.assertConfigureSucceeded res
+      let configureOutput = PT.outputText res
+      assertLineIn customCompilerOpt configureOutput
+      assertLineIn customPkgOpt configureOutput
+      assertCustomCompilerMarkerFile
+      assertCustomHcPkgMarkerFile
 
-    , testCase "Write setup compiler options to LocalBuildInfo" $
-      withEmptyTestDir $ do
-      let persistentBuildCfgFile = buildDir </> ""
-      cabal_configure [] ["--build-compiler-path=bla",
-                          "--build-hc-pkg-path=blub"]
-        >>= PT.assertConfigureSucceeded
-      getPersistBuildConfig persistentBuildCfgFile >>= (mapM_ putStrLn . lines . show)
-      return ()
-    ]
+  , testCase
+    "Pass command line setup compiler options to 'Setup.hs'" $
+    withEmptyTestDir $ do
+      res <- cabal_configure [customCompilerOpt, customPkgOpt]
+      PT.assertConfigureSucceeded res
+      let configureOutput = PT.outputText res
+      assertLineIn customCompilerOpt configureOutput
+      assertLineIn customPkgOpt configureOutput
+      assertCustomCompilerMarkerFile
+      assertCustomHcPkgMarkerFile
+  ]
   where
-    cabal_configure globalArgs configureArgs =
+    cabal_configure configureArgs =
       let configureArgs' = ("--builddir=" ++ buildDir) : configureArgs
+          globalArgs = ["--config-file=" ++ cabalConfigFile]
       in PT.cabal_configure dir globalArgs configureArgs' cabalPath
 
 dir :: FilePath
@@ -78,8 +75,11 @@ testDir = "test-dir"
 buildDir :: FilePath
 buildDir = testDir </> "dist"
 
-configFileHead :: FilePath
-configFileHead =
+cabalConfigFile :: FilePath
+cabalConfigFile = testDir </> "cabal-config"
+
+cabalConfig :: String
+cabalConfig =
   "remote-repo: hackage.haskell.org:http://hackage.haskell.org/packages/archive\n\
   \remote-repo-cache: /home/sven/.cabal/packages\n\
   \world-file: /home/sven/.cabal/world\n\
@@ -88,19 +88,45 @@ configFileHead =
   \remote-build-reporting: anonymous\n\
   \jobs: $ncpus\n\n"
 
-testBuildCompiler :: FilePath
-testBuildCompiler = "./test-build-compiler.sh"
+cabalConfigCustomSetup :: String
+cabalConfigCustomSetup =
+  cabalConfig ++ "\n\
+  \\n\
+  \build-compiler-path: " ++ customCompiler ++ "\n\
+  \build-hc-pkg-path:   " ++ customPkg      ++ "\n\
+  \\n"
 
-markerFile :: FilePath
-markerFile = "TEST_BUILD_COMPILER_MARKER"
+customCompiler :: String
+customCompiler = "./test-build-compiler.sh"
 
-buildCompilerMarkerString :: String
-buildCompilerMarkerString = "%% CUSTOM BUILD COMPILER USED %%"
+customCompilerOpt :: String
+customCompilerOpt = "--build-compiler-path=" ++ customCompiler
+
+customPkg :: String
+customPkg = "./test-build-hc-pkg.sh"
+
+customPkgOpt :: String
+customPkgOpt = "--build-hc-pkg-path=" ++ customPkg
 
 assertLineInFile :: String -> FilePath -> Assertion
 assertLineInFile needle file =
   elem needle . lines <$> readFile file
-  @? "File: \"" ++ file ++ "\" should have contained a line: \""++needle++"\""
+  @? "File: \"" ++ file ++ "\" should have contained this line: \""++needle++"\""
+
+assertLineIn :: String -> String -> Assertion
+assertLineIn needle content = (elem needle $ lines content)
+  @? "The text: \"" ++ content ++ "\" should have contained this line: \""++needle++"\""
+
+assertCustomCompilerMarkerFile :: Assertion
+assertCustomCompilerMarkerFile = assertLineInFile
+                                 "%% CUSTOM BUILD COMPILER USED %%"
+                                 (dir </> testDir </> "TEST_BUILD_COMPILER_OUTPUT")
+
+assertCustomHcPkgMarkerFile :: Assertion
+assertCustomHcPkgMarkerFile = assertLineInFile
+                              "%% CUSTOM BUILD HC PKG USED %%"
+                              (dir </> testDir </> "TEST_BUILD_HC_PKG_OUTPUT")
+
 
 withEmptyTestDir :: IO a -> IO a
 withEmptyTestDir = bracket createTestDir return . const
