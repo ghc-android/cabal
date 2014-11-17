@@ -25,7 +25,8 @@ import Distribution.Client.Setup
          ( ConfigExFlags(..), configureCommand, filterConfigureFlags )
 import Distribution.Client.Types as Source
 import Distribution.Client.SetupWrapper
-         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions )
+         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions,
+           fromConfigFlags )
 import Distribution.Client.Targets
          ( userToPackageConstraint )
 
@@ -100,37 +101,41 @@ configure verbosity packageDBs repos comp platform conf
     Left message -> do
       info verbosity message
       -- TODO sh
-      setupWrapper verbosity (setupScriptOptions installedPkgIndex) Nothing
+      so <- setupScriptOptions installedPkgIndex
+      setupWrapper verbosity so Nothing
         configureCommand (const configFlags) extraArgs
 
     Right installPlan -> case InstallPlan.ready installPlan of
-      [pkg@(ReadyPackage (SourcePackage _ _ (LocalUnpackedPackage _) _) _ _ _)] ->
+      [pkg@(ReadyPackage (SourcePackage _ _ (LocalUnpackedPackage _) _) _ _ _)] -> do
+        so <- setupScriptOptions installedPkgIndex
         configurePackage verbosity
           (InstallPlan.planPlatform installPlan)
           (InstallPlan.planCompiler installPlan)
-          (setupScriptOptions installedPkgIndex)
+          so
           configFlags pkg extraArgs
 
       _ -> die $ "internal error: configure install plan should have exactly "
               ++ "one local ready package."
 
   where
-    setupScriptOptions index = SetupScriptOptions {
-      useCabalVersion  = chooseCabalVersion configExFlags
-                         (flagToMaybe (configCabalVersion configExFlags)),
-      usePackageDB     = packageDBs',
-      usePackageIndex  = index',
-      useProgramConfig = conf,
-      useDistPref      = fromFlagOrDefault
+    setupScriptOptions index = do
+      so <- fromConfigFlags verbosity configFlags
+      return $ so {
+        useCabalVersion  = chooseCabalVersion configExFlags
+                           (flagToMaybe (configCabalVersion configExFlags)),
+        usePackageDB     = packageDBs',
+        usePackageIndex  = index',
+        useProgramConfig = conf,
+        useDistPref      = fromFlagOrDefault
                            -- TODO sh remove undefined
                            (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                            (configDistPref configFlags),
-      useLoggingHandle = Nothing,
-      useWorkingDir    = Nothing,
-      useWin32CleanHack        = False,
-      forceExternalSetupMethod = False,
-      setupCacheLock   = Nothing
-    }
+        useLoggingHandle = Nothing,
+        useWorkingDir    = Nothing,
+        useWin32CleanHack        = False,
+        forceExternalSetupMethod = False,
+        setupCacheLock   = Nothing
+      }
       where
         -- Hack: we typically want to allow the UserPackageDB for finding the
         -- Cabal lib when compiling any Setup.hs even if we're doing a global
