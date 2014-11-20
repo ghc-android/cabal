@@ -10,8 +10,8 @@ import System.FilePath ((</>))
 dir :: FilePath
 dir = "PackageTests" </> "BuildCompilerFlags" </> "BuildTypeCustom"
 
-test :: FilePath -> Test
-test cabalPath =
+test :: PT.TestsPaths -> Test
+test paths =
   testGroup "BuildTypeCustom"
   [
     testCase
@@ -45,5 +45,5 @@ test cabalPath =
       assertTestHcPkgLogFile dir
   ]
   where
-    configure = cabal_configure dir cabalPath
+    configure = cabal_configure paths dir
     withTestDir = withTempDir $ dir </> testDir

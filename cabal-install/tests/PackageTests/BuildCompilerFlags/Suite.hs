@@ -7,22 +7,20 @@ module PackageTests.BuildCompilerFlags.Suite ( test ) where
 -- Tests either relate to 'custom' or 'simple' cabal projects.
 
 import qualified PackageTests.BuildCompilerFlags.BuildTypeCustom.Suite as Custom
-
-import qualified PackageTests.BuildCompilerFlags.BuildTypeSimple.Suite as Simple
-
--- Subdirectory 'BuildTypeCustom' contains a 'custom' cabal project, with a
--- special 'Setup.hs' that not invoke 'defaultMain', but instead echoes the
--- command line parameters into a text file examined by tests.
+-- 'BuildTypeCustom' contains a 'custom' cabal project, with a special
+-- 'Setup.hs' that not invoke 'defaultMain', but instead echoes the command line
+-- parameters into a text file examined by tests.
 --
--- Subdirectory 'BuildTypeSimple' contains a 'simple' cabal project.
+import qualified PackageTests.BuildCompilerFlags.BuildTypeSimple.Suite as Simple
+-- 'BuildTypeSimple' contains a 'simple' cabal project.
 
+import qualified PackageTests.PackageTester as PT
 import Test.Framework (Test, testGroup)
 
-test :: FilePath -> Test
-test cabalPath =
-
+test :: PT.TestsPaths -> Test
+test paths =
   testGroup "BuildCompilerFlags"
-
-  [ Custom.test cabalPath
-  , Simple.test cabalPath
+  [
+    Custom.test paths
+  , Simple.test paths
   ]

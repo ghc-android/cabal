@@ -30,13 +30,13 @@ cabalConfigBuildCompiler = "\
   \build-compiler-path: " ++ testCompiler ++ "\n\
   \build-hc-pkg-path:   " ++ testHcPkg
 
-cabal_configure :: FilePath -> FilePath -> [String] -> IO PT.Result
-cabal_configure wDir cabalPath configureArgs =
+cabal_configure :: PT.TestsPaths -> FilePath -> [String] -> IO PT.Result
+cabal_configure paths wDir configureArgs =
   let
     configureArgs' = buildDirOpt : configureArgs
     globalArgs     = [cabalConfigFileOpt]
   in
-   PT.cabal_configure wDir globalArgs configureArgs' cabalPath
+   PT.cabal_configure paths wDir globalArgs configureArgs'
 
 assertLineInFile :: String -> FilePath -> Assertion
 assertLineInFile needle file =

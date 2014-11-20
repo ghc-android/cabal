@@ -10,8 +10,8 @@ import System.FilePath ((</>))
 dir :: FilePath
 dir = "PackageTests" </> "BuildCompilerFlags" </> "BuildTypeSimple"
 
-test :: FilePath -> Test
-test cabalPath =
+test :: PT.TestsPaths -> Test
+test paths =
   testGroup "BuildTypeSimple"
   [
     testCase
@@ -21,5 +21,5 @@ test cabalPath =
       PT.assertConfigureSucceeded res
   ]
   where
-    configure = cabal_configure dir cabalPath
+    configure = cabal_configure paths dir
     withTestDir = withTempDir $ dir </> testDir
