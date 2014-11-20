@@ -234,7 +234,10 @@ test-suite package-tests
     PackageTests.Exec.Check
     PackageTests.Freeze.Check
     PackageTests.MultipleSource.Check
-    PackageTests.CustomBuildCompiler.Check
+    PackageTests.BuildCompilerFlags.Suite
+    PackageTests.BuildCompilerFlags.Util
+    PackageTests.BuildCompilerFlags.BuildTypeCustom.Suite
+    PackageTests.BuildCompilerFlags.BuildTypeSimple.Suite
     PackageTests.PackageTester
   build-depends:
     Cabal,

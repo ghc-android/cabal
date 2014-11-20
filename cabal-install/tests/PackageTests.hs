@@ -27,13 +27,13 @@ import Test.Framework (Test, defaultMain, testGroup)
 import qualified PackageTests.Exec.Check as Exec
 import qualified PackageTests.Freeze.Check as Freeze
 import qualified PackageTests.MultipleSource.Check as MultipleSource
-import qualified PackageTests.CustomBuildCompiler.Check as CustomBuildCompiler
+import qualified PackageTests.BuildCompilerFlags.Suite as BuildCompilerFlags
 
 -- List of tests to run. Each test will be called with the path to the
 -- cabal binary to use.
 tests :: FilePath -> FilePath -> [Test]
 tests cabalPath ghcPkgPath =
-    [ CustomBuildCompiler.test cabalPath
+    [ BuildCompilerFlags.test cabalPath
       -- TODO sh reactivate tests:
 --    , testGroup "Freeze" $ Freeze.tests cabalPath
 --    , testGroup "Exec"   $ Exec.tests cabalPath ghcPkgPath

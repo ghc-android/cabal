@@ -28,7 +28,7 @@ module PackageTests.PackageTester
     , cabal_sandbox
     , run
 
-    -- * Test helpers
+    -- * Cabal specific assertions
     , assertCleanSucceeded
     , assertExecFailed
     , assertExecSucceeded
@@ -36,6 +36,7 @@ module PackageTests.PackageTester
     , assertConfigureSucceeded
     , assertInstallSucceeded
     , assertSandboxSucceeded
+
     ) where
 
 import qualified Control.Exception.Extensible as E
@@ -162,7 +163,7 @@ run cwd path args = do
                 suckH (c:output) h
 
 ------------------------------------------------------------------------
--- * Test helpers
+-- * Cabal specific assertions
 
 assertCleanSucceeded :: Result -> Assertion
 assertCleanSucceeded result = unless (successful result) $
