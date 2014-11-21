@@ -15,11 +15,20 @@ test paths =
   testGroup "BuildTypeSimple"
   [
     testCase
-    "Save command line setup compiler settings in 'LocalBuildInfo'" $
+    "Use the build compiler defined by 'configure' when executing the 'install' command" $
     withTestDir $ do
-      res <- configure [testBuildCompOpt, testBuildHcPkgOpt]
-      PT.assertConfigureSucceeded res
+      confRes <- configure [testBuildCompOpt, testBuildHcPkgOpt]
+      PT.assertConfigureSucceeded confRes
+
+      instRes <- install ["-j", "4"] -- enforce compilation of Setup.hs
+      let installOutput = PT.outputText instRes
+
+      assertLineInString testBuildCompOpt installOutput
+      assertLineInString testBuildHcPkgOpt installOutput
+      assertTestCompilerLogFile dir
+      assertTestHcPkgLogFile dir
   ]
   where
     configure = cabal_configure paths dir
+    install = PT.cabal_install paths dir
     withTestDir = withTempDir $ dir </> testDir
