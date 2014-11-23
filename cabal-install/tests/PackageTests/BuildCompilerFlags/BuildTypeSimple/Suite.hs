@@ -11,24 +11,26 @@ dir :: FilePath
 dir = "PackageTests" </> "BuildCompilerFlags" </> "BuildTypeSimple"
 
 test :: PT.TestsPaths -> Test
-test paths =
+test paths' =
   testGroup "BuildTypeSimple"
   [
     testCase
     "Use the build compiler defined by 'configure' when executing the 'install' command" $
-    withTestDir $ do
-      confRes <- configure [testBuildCompOpt, testBuildHcPkgOpt]
+    withTestDir $ \ paths -> do
+      copyTestScriptsToTempDir paths
+      let opts = [testBuildCompOpt paths, testBuildHcPkgOpt paths]
+      confRes <- configure paths opts
       PT.assertConfigureSucceeded confRes
 
-      instRes <- install ["-j", "4"] -- enforce compilation of Setup.hs
+      instRes <- install paths ["-j4"] -- enforce compilation of Setup.hs
       let installOutput = PT.outputText instRes
 
-      assertLineInString testBuildCompOpt installOutput
-      assertLineInString testBuildHcPkgOpt installOutput
-      assertTestCompilerLogFile dir
-      assertTestHcPkgLogFile dir
+      assertLineInString (testBuildCompOpt paths) installOutput
+      assertLineInString (testBuildHcPkgOpt paths) installOutput
+      assertTestCompilerLogFile paths
+      assertTestHcPkgLogFile paths
   ]
   where
-    configure = cabal_configure paths dir
-    install = PT.cabal_install paths dir
-    withTestDir = withTempDir $ dir </> testDir
+    configure p = PT.cabal_configure p dir
+    install p = PT.cabal_install p dir
+    withTestDir = PT.withTempBuildDir dir paths'

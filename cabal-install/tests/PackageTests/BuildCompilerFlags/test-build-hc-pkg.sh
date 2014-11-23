@@ -1,5 +1,7 @@
 #!/bin/bash
 
-echo "%% TEST BUILD HC PKG USED %%" > test-dir/TEST_BUILD_HC_PKG_OUTPUT
+TESTDIR=$(dirname "${0##}")
 
-ghc-pkg $@ | tee -a test-dir/TEST_BUILD_HC_PKG_OUTPUT
+echo "%% TEST BUILD HC PKG USED %%" > ${TESTDIR}/TEST_BUILD_HC_PKG_OUTPUT
+
+ghc-pkg $@ | tee -a ${TESTDIR}/TEST_BUILD_HC_PKG_OUTPUT

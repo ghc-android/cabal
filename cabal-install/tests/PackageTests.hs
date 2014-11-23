@@ -65,7 +65,9 @@ main = do
     let testsPaths = TestsPaths {
           cabalPath = programPath cabal,
           ghcPkgPath = programPath ghcPkg,
-          configPath = canonicalConfigPath </> packageTestsConfigFile
+          configPath = canonicalConfigPath </> packageTestsConfigFile,
+          tempDir = Nothing,
+          tempBuildDir = Nothing
         }
 
     putStrLn $ "Using cabal: "   ++ cabalPath  testsPaths

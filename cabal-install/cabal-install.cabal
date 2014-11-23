@@ -252,7 +252,8 @@ test-suite package-tests
     regex-posix,
     test-framework,
     test-framework-hunit,
-    test-framework-quickcheck2 >= 0.2.12
+    test-framework-quickcheck2 >= 0.2.12,
+    random
 
   if os(windows)
     build-depends: Win32 >= 2 && < 3

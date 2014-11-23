@@ -3,40 +3,40 @@ module PackageTests.BuildCompilerFlags.Util where
 import qualified PackageTests.PackageTester as PT
 
 import Test.HUnit ( (@?), Assertion )
-import Control.Exception (bracket)
+import Data.Maybe ( fromJust )
 import Control.Applicative ( (<$>) )
-import Control.Monad (when)
-import System.Directory ( removeDirectoryRecursive
-                        , createDirectory
-                        , doesDirectoryExist )
 import System.FilePath ( (</>) )
+import System.Directory ( copyFile )
 
-testHcPkg, testCompiler, cabalConfigFile, buildDir, testDir :: FilePath
-buildDirOpt, cabalConfigFileOpt, cabalConfigBuildCompiler, testBuildCompOpt,
-  testBuildHcPkgOpt :: String
+testHcPkg, testCompiler :: FilePath
+testCompiler = "test-build-compiler.sh"
+testHcPkg = "test-build-hc-pkg.sh"
 
-testDir            = "test-dir"
-buildDir           = testDir </> "dist"
-buildDirOpt        = "--builddir=" ++ buildDir
-cabalConfigFile    = testDir </> "cabal-config"
-cabalConfigFileOpt = "--config-file=" ++ cabalConfigFile
-testCompiler       = "../test-build-compiler.sh"
-testBuildCompOpt   = "--build-compiler-path=" ++ testCompiler
-testHcPkg          = "../test-build-hc-pkg.sh"
-testBuildHcPkgOpt  = "--build-hc-pkg-path=" ++ testHcPkg
+testHcPkgPath, testCompilerPath :: PT.TestsPaths -> FilePath
+testCompilerPath paths =
+  fromJust (PT.tempDir paths) </> testCompiler
+testHcPkgPath paths =
+  fromJust (PT.tempDir paths) </> testHcPkg
 
-cabalConfigBuildCompiler = "\
+testBuildCompOpt, testBuildHcPkgOpt :: PT.TestsPaths -> String
+testBuildCompOpt paths =
+  "--build-compiler-path=" ++ testCompilerPath paths
+testBuildHcPkgOpt paths =
+  "--build-hc-pkg-path=" ++ testHcPkgPath paths
+
+-- | Copy 'testCompiler' and 'testHcPkg' to 'tempDir', so when they write their
+-- output files they write them to the tests temp dir.
+copyTestScriptsToTempDir :: PT.TestsPaths -> IO ()
+copyTestScriptsToTempDir paths = do
+  let sourceDir = "PackageTests" </> "BuildCompilerFlags"
+  copyFile (sourceDir </> testCompiler) (testCompilerPath paths)
+  copyFile (sourceDir </> testHcPkg) (testHcPkgPath paths)
+
+cabalConfigBuildCompiler :: PT.TestsPaths -> String
+cabalConfigBuildCompiler paths = "\
   \jobs: 1\n\
-  \build-compiler-path: " ++ testCompiler ++ "\n\
-  \build-hc-pkg-path:   " ++ testHcPkg
-
-cabal_configure :: PT.TestsPaths -> FilePath -> [String] -> IO PT.Result
-cabal_configure paths wDir configureArgs =
-  let
-    configureArgs' = buildDirOpt : configureArgs
-    globalArgs     = [cabalConfigFileOpt]
-  in
-   PT.cabal_configure paths wDir globalArgs configureArgs'
+  \build-compiler-path: " ++ testCompilerPath paths ++ "\n\
+  \build-hc-pkg-path:   " ++ testHcPkgPath paths
 
 assertLineInFile :: String -> FilePath -> Assertion
 assertLineInFile needle file =
@@ -49,23 +49,12 @@ assertLineInString needle content = (elem needle $ lines content)
   @? "The text: \"" ++ content ++
   "\" should have contained this line: \""++needle++"\""
 
-
-withTempDir :: FilePath -> IO a -> IO a
-withTempDir d = bracket createTestDir removeDirectoryRecursive . const
-  where
-    createTestDir = do
-      testDirExists <- doesDirectoryExist d
-      when testDirExists $
-        removeDirectoryRecursive d
-      createDirectory d
-      return d
-
-assertTestCompilerLogFile :: FilePath -> Assertion
-assertTestCompilerLogFile wDir =
+assertTestCompilerLogFile :: PT.TestsPaths -> Assertion
+assertTestCompilerLogFile paths =
   assertLineInFile "%% TEST BUILD COMPILER USED %%"
-  (wDir </> testDir </> "TEST_BUILD_COMPILER_OUTPUT")
+  (fromJust (PT.tempDir paths) </> "TEST_BUILD_COMPILER_OUTPUT")
 
-assertTestHcPkgLogFile :: FilePath -> Assertion
-assertTestHcPkgLogFile wDir =
+assertTestHcPkgLogFile :: PT.TestsPaths -> Assertion
+assertTestHcPkgLogFile paths =
   assertLineInFile "%% TEST BUILD HC PKG USED %%"
-  (wDir </> testDir </> "TEST_BUILD_HC_PKG_OUTPUT")
+  (fromJust (PT.tempDir paths) </> "TEST_BUILD_HC_PKG_OUTPUT")

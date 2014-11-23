@@ -11,39 +11,42 @@ dir :: FilePath
 dir = "PackageTests" </> "BuildCompilerFlags" </> "BuildTypeCustom"
 
 test :: PT.TestsPaths -> Test
-test paths =
+test paths' =
   testGroup "BuildTypeCustom"
   [
     testCase
     "Add default setup compiler options to newly generated ~/.cabal/config" $
-    withTestDir $ do
-      _ <- configure []
-      assertLineInFile "-- build-compiler-path:" (dir </> cabalConfigFile)
-      assertLineInFile "-- build-hc-pkg-path:" (dir </> cabalConfigFile)
+    withTestDir $ \ paths -> do
+      _ <- configure paths []
+      assertLineInFile "-- build-compiler-path:" (PT.configPath paths)
+      assertLineInFile "-- build-hc-pkg-path:" (PT.configPath paths)
 
   , testCase
     "Pass setup compiler options from ~/.cabal/config to 'Setup.hs'" $
-    withTestDir $ do
-      writeFile (dir </> cabalConfigFile) cabalConfigBuildCompiler
-      res <- configure []
+    withTestDir $ \ paths -> do
+      copyTestScriptsToTempDir paths
+      writeFile (PT.configPath paths) (cabalConfigBuildCompiler paths)
+      res <- configure paths []
       PT.assertConfigureSucceeded res
       let configureOutput = PT.outputText res
-      assertLineInString testBuildCompOpt configureOutput
-      assertLineInString testBuildHcPkgOpt configureOutput
-      assertTestCompilerLogFile dir
-      assertTestHcPkgLogFile dir
+      assertLineInString (testBuildCompOpt paths) configureOutput
+      assertLineInString (testBuildHcPkgOpt paths) configureOutput
+      assertTestCompilerLogFile paths
+      assertTestHcPkgLogFile paths
 
   , testCase
     "Pass command line setup compiler options to 'Setup.hs'" $
-    withTestDir $ do
-      res <- configure [testBuildCompOpt, testBuildHcPkgOpt]
+    withTestDir $ \ paths -> do
+      copyTestScriptsToTempDir paths
+      let opts = [testBuildCompOpt paths, testBuildHcPkgOpt paths]
+      res <- configure paths opts
       PT.assertConfigureSucceeded res
       let configureOutput = PT.outputText res
-      assertLineInString testBuildCompOpt configureOutput
-      assertLineInString testBuildHcPkgOpt configureOutput
-      assertTestCompilerLogFile dir
-      assertTestHcPkgLogFile dir
+      assertLineInString (testBuildCompOpt paths) configureOutput
+      assertLineInString (testBuildHcPkgOpt paths) configureOutput
+      assertTestCompilerLogFile paths
+      assertTestHcPkgLogFile paths
   ]
   where
-    configure = cabal_configure paths dir
-    withTestDir = withTempDir $ dir </> testDir
+    configure p = PT.cabal_configure p dir
+    withTestDir = PT.withTempBuildDir dir paths'

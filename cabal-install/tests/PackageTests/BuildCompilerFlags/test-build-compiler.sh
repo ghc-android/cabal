@@ -1,5 +1,7 @@
 #!/bin/bash
 
-echo "%% TEST BUILD COMPILER USED %%" > test-dir/TEST_BUILD_COMPILER_OUTPUT
+TESTDIR=$(dirname "${0##}")
 
-ghc $@ | tee -a test-dir/TEST_BUILD_COMPILER_OUTPUT
+echo "%% TEST BUILD COMPILER USED %%" > ${TESTDIR}/TEST_BUILD_COMPILER_OUTPUT
+
+ghc $@ | tee -a  ${TESTDIR}/TEST_BUILD_COMPILER_OUTPUT
