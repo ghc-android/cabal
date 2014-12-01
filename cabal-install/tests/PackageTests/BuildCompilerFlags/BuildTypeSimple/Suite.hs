@@ -12,25 +12,17 @@ dir = "PackageTests" </> "BuildCompilerFlags" </> "BuildTypeSimple"
 
 test :: PT.TestsPaths -> Test
 test paths' =
-  testGroup "BuildTypeSimple"
+  testGroup "BuildTypeSimple - Smoke tests"
   [
     testCase
-    "Use the build compiler defined by 'configure' when executing the 'install' command" $
+    "A 'simple' project can be configured and installed in the presence of '--with-build-*' flags" $
     withTestDir $ \ paths -> do
       copyTestScriptsToTempDir paths
       let opts = [testBuildCompOpt paths, testBuildHcPkgOpt paths]
-      confRes <- configure paths opts
+      confRes <- PT.cabal_configure paths dir opts
       PT.assertConfigureSucceeded confRes
-
-      instRes <- install paths ["-j4"] -- enforce compilation of Setup.hs
-      let installOutput = PT.outputText instRes
-
-      assertLineInString (testBuildCompOpt paths) installOutput
-      assertLineInString (testBuildHcPkgOpt paths) installOutput
-      assertTestCompilerLogFile paths
-      assertTestHcPkgLogFile paths
+      instRes <- PT.cabal_install paths dir []
+      PT.assertInstallSucceeded instRes
   ]
   where
-    configure p = PT.cabal_configure p dir
-    install p = PT.cabal_install p dir
     withTestDir = PT.withTempBuildDir dir paths'

@@ -87,7 +87,8 @@ import Distribution.Client.Types as Source
 import Distribution.Client.BuildReports.Types
          ( ReportLevel(..) )
 import Distribution.Client.SetupWrapper
-         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions )
+         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions,
+           fromConfigFlags )
 import qualified Distribution.Client.BuildReports.Anonymous as BuildReports
 import qualified Distribution.Client.BuildReports.Storage as BuildReports
          ( storeAnonymous, storeLocal, fromInstallPlan, fromPlanningFailure )
@@ -969,7 +970,7 @@ performInstallations :: Verbosity
                      -> InstallPlan
                      -> IO InstallPlan
 performInstallations verbosity
-  (packageDBs, _, comp, _, conf, useSandbox, _,
+  (packageDBs, _, comp, _, _conf, useSandbox, _,
    globalFlags, configFlags, configExFlags, installFlags, haddockFlags)
   installedPkgIndex installPlan = do
 
@@ -994,9 +995,10 @@ performInstallations verbosity
                         rpkg $ \configFlags' src pkg pkgoverride ->
       fetchSourcePackage verbosity fetchLimit src $ \src' ->
         installLocalPackage verbosity buildLimit
-                            (packageId pkg) src' distPref $ \mpath ->
+                            (packageId pkg) src' distPref $ \mpath -> do
+          setupOpts <- setupScriptOptions installedPkgIndex cacheLock
           installUnpackedPackage verbosity buildLimit installLock numJobs pkg_key
-                                 (setupScriptOptions installedPkgIndex cacheLock)
+                                 setupOpts
                                  miscOptions configFlags' installFlags haddockFlags
                                  compid platform pkg pkgoverride mpath useLogFile
 
@@ -1012,12 +1014,11 @@ performInstallations verbosity
     distPref        = fromFlagOrDefault (useDistPref $ defaultSetupScriptOptions undefined undefined undefined)
                       (configDistPref configFlags)
 
-    setupScriptOptions index lock = SetupScriptOptions {
+    setupScriptOptions index lock = do
+      defaultOptions <- fromConfigFlags verbosity configFlags
+      return $ defaultOptions {
       useCabalVersion  = chooseCabalVersion configExFlags
                          (libVersion miscOptions),
-      -- TODO sh set build compiler
-      useCompiler      = comp,
-      usePlatform      = platform,
       -- Hack: we typically want to allow the UserPackageDB for finding the
       -- Cabal lib when compiling any Setup.hs even if we're doing a global
       -- install. However we also allow looking in a specific package db.
@@ -1030,7 +1031,8 @@ performInstallations verbosity
       usePackageIndex  = if UserPackageDB `elem` packageDBs
                            then Just index
                            else Nothing,
-      useProgramConfig = conf,
+      -- TODO sh analyze that 'conf' value and find out if it contains valueable information, that is required here
+--      useProgramConfig = conf,
       useDistPref      = distPref,
       useLoggingHandle = Nothing,
       useWorkingDir    = Nothing,
