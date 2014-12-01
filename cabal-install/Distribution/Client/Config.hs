@@ -287,6 +287,7 @@ instance Monoid SavedConfig where
         configConstraints         = lastNonEmpty configConstraints,
         -- TODO: NubListify
         configDependencies        = lastNonEmpty configDependencies,
+        configInstantiateWith     = lastNonEmpty configInstantiateWith,
         -- TODO: NubListify
         configConfigurationsFlags = lastNonEmpty configConfigurationsFlags,
         configTests               = combine configTests,
