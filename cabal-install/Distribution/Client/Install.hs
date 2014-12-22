@@ -293,6 +293,7 @@ processInstallPlan verbosity
   args@(_,_, comp, _, _, _, _, _, _, _, installFlags, _)
   (installedPkgIndex, sourcePkgDb,
    userTargets, pkgSpecifiers) installPlan = do
+
     checkPrintPlan verbosity comp installedPkgIndex installPlan sourcePkgDb
       installFlags pkgSpecifiers
 
@@ -1016,30 +1017,30 @@ performInstallations verbosity
 
     setupScriptOptions index lock = do
       defaultOptions <- fromConfigFlags verbosity configFlags
-      return $ defaultOptions {
-      useCabalVersion  = chooseCabalVersion configExFlags
-                         (libVersion miscOptions),
-      -- Hack: we typically want to allow the UserPackageDB for finding the
-      -- Cabal lib when compiling any Setup.hs even if we're doing a global
-      -- install. However we also allow looking in a specific package db.
-      usePackageDB     = if UserPackageDB `elem` packageDBs
-                           then packageDBs
-                           else let (db@GlobalPackageDB:dbs) = packageDBs
-                                 in db : UserPackageDB : dbs,
-                                --TODO: use Ord instance:
-                                -- insert UserPackageDB packageDBs
-      usePackageIndex  = if UserPackageDB `elem` packageDBs
-                           then Just index
-                           else Nothing,
-      -- TODO sh analyze that 'conf' value and find out if it contains valueable information, that is required here
---      useProgramConfig = conf,
-      useDistPref      = distPref,
-      useLoggingHandle = Nothing,
-      useWorkingDir    = Nothing,
-      forceExternalSetupMethod = parallelInstall,
-      useWin32CleanHack        = False,
-      setupCacheLock   = Just lock
-    }
+      let opts = defaultOptions {
+        useCabalVersion  = chooseCabalVersion configExFlags
+                           (libVersion miscOptions),
+        -- Hack: we typically want to allow the UserPackageDB for finding the
+        -- Cabal lib when compiling any Setup.hs even if we're doing a global
+        -- install. However we also allow looking in a specific package db.
+        usePackageDB     = if UserPackageDB `elem` packageDBs
+                             then packageDBs
+                             else let (db@GlobalPackageDB:dbs) = packageDBs
+                                   in db : UserPackageDB : dbs,
+                                  --TODO: use Ord instance:
+                                  -- insert UserPackageDB packageDBs
+        usePackageIndex  = if UserPackageDB `elem` packageDBs
+                             then Just index
+                             else Nothing,
+        -- TODO sh analyze that 'conf' value and find out if it contains valueable information, that is required here
+  --      useProgramConfig = conf,
+        useDistPref      = distPref,
+        useLoggingHandle = Nothing,
+        useWorkingDir    = Nothing,
+        forceExternalSetupMethod = parallelInstall,
+        useWin32CleanHack        = False,
+        setupCacheLock   = Just lock }
+      return opts
     reportingLevel = fromFlag (installBuildReports installFlags)
     logsDir        = fromFlag (globalLogsDir globalFlags)
 

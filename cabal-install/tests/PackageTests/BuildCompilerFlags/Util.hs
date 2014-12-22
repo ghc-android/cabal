@@ -4,6 +4,7 @@ import qualified PackageTests.PackageTester as PT
 
 import Test.HUnit ( (@?), Assertion )
 import Data.Maybe ( fromJust )
+import Data.List ( isInfixOf )
 import Control.Applicative ( (<$>) )
 import System.FilePath ( (</>) )
 import System.Directory ( copyFile )
@@ -40,12 +41,12 @@ cabalConfigBuildCompiler paths = "\
 
 assertLineInFile :: String -> FilePath -> Assertion
 assertLineInFile needle file =
-  elem needle . lines <$> readFile file
+  isInfixOf needle <$> readFile file
   @? "File: \"" ++ file ++
   "\" should have contained this line: \""++needle++"\""
 
 assertLineInString :: String -> String -> Assertion
-assertLineInString needle content = (elem needle $ lines content)
+assertLineInString needle content = (needle `isInfixOf` content)
   @? "The text: \"" ++ content ++
   "\" should have contained this line: \""++needle++"\""
 

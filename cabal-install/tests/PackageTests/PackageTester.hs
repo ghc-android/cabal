@@ -100,9 +100,8 @@ data TestsPaths = TestsPaths
     , configPath   :: FilePath       -- ^ absolute path of the default config
                                     -- file to use for tests (tests are free to
                                     -- use a different one).
-    , tempBuildDir :: Maybe FilePath -- ^ absolute path to a alternative to the
-                                    -- default build output directory
-                                    -- (e.g. @dist@)
+    , tempBuildDir :: Maybe FilePath -- ^ absolute path to the build output
+                                    -- directory (e.g. @dist@)
     , tempDir      :: Maybe FilePath -- ^ absolute temporary directory for all
                                     -- kinds of intermediate test/test-build
                                     -- artifacts.
@@ -146,7 +145,7 @@ withTempBuildDir dir paths action = bracket create remove action
                          , tempBuildDir = Just $ temp </> "dist" }
       return paths'
 
-    remove = removeDirectoryRecursive . fromJust . tempDir
+    remove = const $ return undefined -- removeDirectoryRecursive . fromJust . tempDir
 
 ------------------------------------------------------------------------
 -- * Running cabal commands

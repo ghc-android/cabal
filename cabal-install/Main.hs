@@ -55,7 +55,8 @@ import Distribution.Simple.Setup
          )
 
 import Distribution.Client.SetupWrapper
-         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions )
+         ( setupWrapper, SetupScriptOptions(..), defaultSetupScriptOptions
+         , fromConfigFlags )
 import Distribution.Client.Config
          ( SavedConfig(..), loadConfig, defaultConfigFile, userConfigDiff
          , userConfigUpdate )
@@ -636,16 +637,22 @@ installAction :: (ConfigFlags, ConfigExFlags, InstallFlags, HaddockFlags)
               -> [String] -> GlobalFlags -> IO ()
 installAction (configFlags, _, installFlags, _) _ _globalFlags
   | fromFlagOrDefault False (installOnly installFlags)
-  = let verbosity = fromFlagOrDefault normal (configVerbosity configFlags)
-        -- TODO sh remove undefined
-    in setupWrapper verbosity (defaultSetupScriptOptions undefined undefined undefined) Nothing
-         installCommand (const mempty) []
+  = do
+    let verbosity = fromFlagOrDefault normal (configVerbosity configFlags)
+    -- DOING sh
+    putStrLn $ "\n\n\n$$$$$\n" ++ show (configBuildHc configFlags)
+
+    setupOpts <- fromConfigFlags verbosity configFlags
+    setupWrapper verbosity setupOpts Nothing
+      installCommand (const mempty) []
 
 installAction (configFlags, configExFlags, installFlags, haddockFlags)
               extraArgs globalFlags = do
+  putStrLn $ "\n\n\n$$$$$\n" ++ show (configBuildHc configFlags)
   let verbosity = fromFlagOrDefault normal (configVerbosity configFlags)
   (useSandbox, config) <- loadConfigOrSandboxConfig verbosity
                           globalFlags (configUserInstall configFlags)
+
   targets <- readUserTargets verbosity extraArgs
 
   -- TODO: It'd be nice if 'cabal install' picked up the '-w' flag passed to
