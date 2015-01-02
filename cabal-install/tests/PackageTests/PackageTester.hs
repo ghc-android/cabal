@@ -145,7 +145,7 @@ withTempBuildDir dir paths action = bracket create remove action
                          , tempBuildDir = Just $ temp </> "dist" }
       return paths'
 
-    remove = const $ return undefined -- removeDirectoryRecursive . fromJust . tempDir
+    remove = removeDirectoryRecursive . fromJust . tempDir
 
 ------------------------------------------------------------------------
 -- * Running cabal commands
