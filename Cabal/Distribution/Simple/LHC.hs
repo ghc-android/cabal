@@ -35,13 +35,15 @@ module Distribution.Simple.LHC (
         buildLib, buildExe,
         installLib, installExe,
         registerPackage,
+        hcPkgInfo,
         ghcOptions,
         ghcVerbosityOptions
  ) where
 
 import Distribution.PackageDescription as PD
          ( PackageDescription(..), BuildInfo(..), Executable(..)
-         , Library(..), libModules, hcOptions, usedExtensions, allExtensions )
+         , Library(..), libModules, hcOptions, hcProfOptions, hcSharedOptions
+         , usedExtensions, allExtensions )
 import Distribution.InstalledPackageInfo
                                 ( InstalledPackageInfo
                                 , parseInstalledPackageInfo )
@@ -72,7 +74,7 @@ import Distribution.Simple.Program
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.Simple.Compiler
          ( CompilerFlavor(..), CompilerId(..), Compiler(..), compilerVersion
-         , OptimisationLevel(..), PackageDB(..), PackageDBStack
+         , OptimisationLevel(..), PackageDB(..), PackageDBStack, AbiTag(..)
          , Flag, languageToFlags, extensionsToFlags )
 import Distribution.Version
          ( Version(..), orLaterVersion )
@@ -125,6 +127,8 @@ configure verbosity hcPath hcPkgPath conf = do
 
   let comp = Compiler {
         compilerId             = CompilerId LHC lhcVersion,
+        compilerAbiTag         = NoAbiTag,
+        compilerCompat         = [],
         compilerLanguages      = languages,
         compilerExtensions     = extensions,
         compilerProperties     = M.empty
@@ -344,13 +348,13 @@ buildLib verbosity pkg_descr lbi lib clbi = do
               "-hisuf", "p_hi",
               "-osuf", "p_o"
              ]
-          ++ ghcProfOptions libBi
+          ++ hcProfOptions GHC libBi
       ghcArgsShared = ghcArgs
           ++ ["-dynamic",
               "-hisuf", "dyn_hi",
               "-osuf", "dyn_o", "-fPIC"
              ]
-          ++ ghcSharedOptions libBi
+          ++ hcSharedOptions GHC libBi
   unless (null (libModules lib)) $
     do ifVanillaLib forceVanillaLib (runGhcProg $ lhcWrap ghcArgs)
        ifProfLib (runGhcProg $ lhcWrap ghcArgsProf)
@@ -529,7 +533,7 @@ buildExe verbosity _pkg_descr lbi
                 then ["-prof",
                       "-hisuf", "p_hi",
                       "-osuf", "p_o"
-                     ] ++ ghcProfOptions exeBi
+                     ] ++ hcProfOptions GHC exeBi
                 else []
 
   -- For building exe's for profiling that use TH we actually
@@ -781,6 +785,15 @@ registerPackage
   -> Bool
   -> PackageDBStack
   -> IO ()
-registerPackage verbosity installedPkgInfo _pkg lbi _inplace packageDbs = do
-  let Just lhcPkg = lookupProgram lhcPkgProgram (withPrograms lbi)
-  HcPkg.reregister verbosity lhcPkg packageDbs (Right installedPkgInfo)
+registerPackage verbosity installedPkgInfo _pkg lbi _inplace packageDbs =
+  HcPkg.reregister (hcPkgInfo $ withPrograms lbi) verbosity packageDbs
+    (Right installedPkgInfo)
+
+hcPkgInfo :: ProgramConfiguration -> HcPkg.HcPkgInfo
+hcPkgInfo conf = HcPkg.HcPkgInfo { HcPkg.hcPkgProgram    = lhcPkgProg
+                                 , HcPkg.noPkgDbStack    = False
+                                 , HcPkg.noVerboseFlag   = False
+                                 , HcPkg.flagPackageConf = False
+                                 }
+  where
+    Just lhcPkgProg = lookupProgram lhcPkgProgram conf

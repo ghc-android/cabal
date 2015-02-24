@@ -54,6 +54,7 @@ module Distribution.Simple.Utils (
         installExecutableFiles,
         installMaybeExecutableFiles,
         installDirectoryContents,
+        copyDirectoryRecursive,
 
         -- * File permissions
         doesExecutableExist,
@@ -62,6 +63,7 @@ module Distribution.Simple.Utils (
 
         -- * file names
         currentDir,
+        shortRelativePath,
 
         -- * finding files
         findFile,
@@ -74,6 +76,7 @@ module Distribution.Simple.Utils (
 
         -- * environment variables
         isInSearchPath,
+        addLibraryPath,
 
         -- * simple file globbing
         matchFileGlob,
@@ -150,8 +153,9 @@ import System.Exit
     ( exitWith, ExitCode(..) )
 import System.FilePath
     ( normalise, (</>), (<.>)
-    , getSearchPath, takeDirectory, splitFileName
-    , splitExtension, splitExtensions, splitDirectories )
+    , getSearchPath, joinPath, takeDirectory, splitFileName
+    , splitExtension, splitExtensions, splitDirectories
+    , searchPathSeparator )
 import System.Directory
     ( createDirectory, renameFile, removeDirectoryRecursive )
 import System.IO
@@ -173,6 +177,8 @@ import Distribution.Package
     ( PackageIdentifier )
 import Distribution.ModuleName (ModuleName)
 import qualified Distribution.ModuleName as ModuleName
+import Distribution.System
+    ( OS (..) )
 import Distribution.Version
     (Version(..))
 
@@ -693,6 +699,25 @@ getDirectoryContentsRecursive topdir = recurseDirectories [""]
 isInSearchPath :: FilePath -> IO Bool
 isInSearchPath path = fmap (elem path) getSearchPath
 
+addLibraryPath :: OS
+               -> [FilePath]
+               -> [(String,String)]
+               -> [(String,String)]
+addLibraryPath os paths = addEnv
+  where
+    pathsString = intercalate [searchPathSeparator] paths
+    ldPath = case os of
+               OSX -> "DYLD_LIBRARY_PATH"
+               _   -> "LD_LIBRARY_PATH"
+
+    addEnv [] = [(ldPath,pathsString)]
+    addEnv ((key,value):xs)
+      | key == ldPath =
+          if null value
+             then (key,pathsString):xs
+             else (key,value ++ (searchPathSeparator:pathsString)):xs
+      | otherwise     = (key,value):addEnv xs
+
 ----------------
 -- File globbing
 
@@ -920,6 +945,13 @@ installDirectoryContents verbosity srcDir destDir = do
   srcFiles <- getDirectoryContentsRecursive srcDir
   installOrdinaryFiles verbosity destDir [ (srcDir, f) | f <- srcFiles ]
 
+-- | Recursively copy the contents of one directory to another path.
+copyDirectoryRecursive :: Verbosity -> FilePath -> FilePath -> IO ()
+copyDirectoryRecursive verbosity srcDir destDir = do
+  info verbosity ("copy directory '" ++ srcDir ++ "' to '" ++ destDir ++ "'.")
+  srcFiles <- getDirectoryContentsRecursive srcDir
+  copyFilesWith (const copyFile) verbosity destDir [ (srcDir, f) | f <- srcFiles ]
+
 -------------------
 -- File permissions
 
@@ -1062,6 +1094,16 @@ rewriteFile path newContent =
 -- (E.g. AmigaOS uses the empty string @\"\"@ for the current directory.)
 currentDir :: FilePath
 currentDir = "."
+
+shortRelativePath :: FilePath -> FilePath -> FilePath
+shortRelativePath from to =
+    case dropCommonPrefix (splitDirectories from) (splitDirectories to) of
+        (stuff, path) -> joinPath (map (const "..") stuff ++ path)
+  where
+    dropCommonPrefix :: Eq a => [a] -> [a] -> ([a],[a])
+    dropCommonPrefix (x:xs) (y:ys)
+        | x == y    = dropCommonPrefix xs ys
+    dropCommonPrefix xs ys = (xs,ys)
 
 -- ------------------------------------------------------------
 -- * Finding the description file

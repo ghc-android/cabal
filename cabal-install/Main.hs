@@ -126,10 +126,11 @@ import Distribution.Simple.Compiler
          ( Compiler(..) )
 import Distribution.Simple.Configure
          ( checkPersistBuildConfigOutdated, configCompilerAuxEx
-         , ConfigStateFileErrorType(..), localBuildInfoFile
+         , ConfigStateFileError(..), localBuildInfoFile
          , getPersistBuildConfig, tryGetPersistBuildConfig )
 import qualified Distribution.Simple.LocalBuildInfo as LBI
-import Distribution.Simple.Program (defaultProgramConfiguration)
+import Distribution.Simple.Program (defaultProgramConfiguration
+                                   ,configureAllKnownPrograms)
 import qualified Distribution.Simple.Setup as Cabal
 import Distribution.Simple.Utils
          ( cabalVersion, die, notice, info, topHandler
@@ -174,7 +175,7 @@ main = do
 
 mainWorker :: [String] -> IO ()
 mainWorker args = topHandler $
-  case commandsRun globalCommand commands args of
+  case commandsRun (globalCommand commands) commands args of
     CommandHelp   help                 -> printGlobalHelp help
     CommandList   opts                 -> printOptionsList opts
     CommandErrors errs                 -> printErrors errs
@@ -477,8 +478,8 @@ reconfigure verbosity distPref     addConfigFlags extraArgs globalFlags
             skipAddSourceDepsCheck numJobsFlag    checkFlags = do
   eLbi <- tryGetPersistBuildConfig distPref
   case eLbi of
-    Left (err, errCode) -> onNoBuildConfig err errCode
-    Right lbi           -> onBuildConfig lbi
+    Left err  -> onNoBuildConfig err
+    Right lbi -> onBuildConfig lbi
 
   where
 
@@ -486,17 +487,16 @@ reconfigure verbosity distPref     addConfigFlags extraArgs globalFlags
     --
     -- If we're in a sandbox: add-source deps don't have to be reinstalled
     -- (since we don't know the compiler & platform).
-    onNoBuildConfig :: String -> ConfigStateFileErrorType
-                       -> IO (UseSandbox, SavedConfig)
-    onNoBuildConfig err errCode = do
-      let msg = case errCode of
-            ConfigStateFileMissing    -> "Package has never been configured."
-            ConfigStateFileCantParse  -> "Saved package config file seems "
-                                         ++ "to be corrupt."
-            ConfigStateFileBadVersion -> err
-      case errCode of
-        ConfigStateFileBadVersion -> info verbosity msg
-        _                         -> do
+    onNoBuildConfig :: ConfigStateFileError -> IO (UseSandbox, SavedConfig)
+    onNoBuildConfig err = do
+      let msg = case err of
+            ConfigStateFileMissing -> "Package has never been configured."
+            ConfigStateFileNoParse -> "Saved package config file seems "
+                                      ++ "to be corrupt."
+            _ -> show err
+      case err of
+        ConfigStateFileBadVersion _ _ _ -> info verbosity msg
+        _                               -> do
           notice verbosity
             $ msg ++ " Configuring with default flags." ++ configureManually
           configureAction (defaultFlags, defaultConfigExFlags)
@@ -678,6 +678,9 @@ installAction (configFlags, configExFlags, installFlags, haddockFlags)
                         savedHaddockFlags     config `mappend` haddockFlags
       globalFlags'    = savedGlobalFlags      config `mappend` globalFlags
   (comp, platform, conf) <- configCompilerAux' configFlags'
+  -- TODO: Redesign ProgramDB API to prevent such problems as #2241 in the future.
+  conf' <- configureAllKnownPrograms verbosity conf
+
   -- If we're working inside a sandbox and the user has set the -w option, we
   -- may need to create a sandbox-local package DB for this compiler and add a
   -- timestamp record for this compiler to the timestamp file.
@@ -689,7 +692,7 @@ installAction (configFlags, configExFlags, installFlags, haddockFlags)
             }
 
   whenUsingSandbox useSandbox $ \sandboxDir -> do
-    initPackageDBIfNeeded verbosity configFlags'' comp conf
+    initPackageDBIfNeeded verbosity configFlags'' comp conf'
 
     indexFile     <- tryGetIndexFilePath config
     maybeAddCompilerTimestampRecord verbosity sandboxDir indexFile
@@ -706,7 +709,7 @@ installAction (configFlags, configExFlags, installFlags, haddockFlags)
       install verbosity
               (configPackageDB' configFlags'')
               (globalRepos globalFlags')
-              comp platform conf
+              comp platform conf'
               useSandbox mSandboxPkgInfo
               globalFlags' configFlags'' configExFlags'
               installFlags' haddockFlags'
@@ -1071,6 +1074,12 @@ sandboxAction sandboxFlags extraArgs globalFlags = do
         when (noExtraArgs extra) $
           die "The 'sandbox add-source' command expects at least one argument"
         sandboxAddSource verbosity extra sandboxFlags globalFlags
+    ("delete-source":extra) -> do
+        when (noExtraArgs extra) $
+          die "The 'sandbox delete-source' command expects \
+              \at least one argument"
+        sandboxDeleteSource verbosity extra sandboxFlags globalFlags
+    ["list-sources"] -> sandboxListSources verbosity sandboxFlags globalFlags
 
     -- More advanced commands.
     ("hc-pkg":extra) -> do
@@ -1080,12 +1089,6 @@ sandboxAction sandboxFlags extraArgs globalFlags = do
     ["buildopts"] -> die "Not implemented!"
 
     -- Hidden commands.
-    ("delete-source":extra) -> do
-        when (noExtraArgs extra) $
-          die "The 'sandbox delete-source' command expects \
-              \at least one argument"
-        sandboxDeleteSource verbosity extra sandboxFlags globalFlags
-    ["list-sources"] -> sandboxListSources verbosity sandboxFlags globalFlags
     ["dump-pkgenv"]  -> dumpPackageEnvironment verbosity sandboxFlags globalFlags
 
     -- Error handling.

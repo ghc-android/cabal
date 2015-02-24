@@ -7,8 +7,8 @@ import Distribution.Compat.Environment ( getEnvironment )
 import qualified Distribution.PackageDescription as PD
 import Distribution.Simple.Build.PathsModule ( pkgPathEnvVar )
 import Distribution.Simple.BuildPaths ( exeExtension )
-import Distribution.Simple.Compiler ( Compiler(..) )
-import Distribution.Simple.Hpc ( markupTest, tixDir, tixFilePath )
+import Distribution.Simple.Compiler ( compilerInfo )
+import Distribution.Simple.Hpc ( guessWay, markupTest, tixDir, tixFilePath )
 import Distribution.Simple.InstallDirs
     ( fromPathTemplate, initialPathTemplateEnv, PathTemplateVariable(..)
     , substPathTemplate , toPathTemplate, PathTemplate )
@@ -16,7 +16,9 @@ import qualified Distribution.Simple.LocalBuildInfo as LBI
 import Distribution.Simple.Setup
     ( TestFlags(..), TestShowDetails(..), fromFlag, configCoverage )
 import Distribution.Simple.Test.Log
-import Distribution.Simple.Utils ( die, notice, rawSystemIOWithEnv )
+import Distribution.Simple.Utils
+    ( die, notice, rawSystemIOWithEnv, addLibraryPath )
+import Distribution.System ( Platform (..) )
 import Distribution.TestSuite
 import Distribution.Text
 import Distribution.Verbosity ( normal )
@@ -37,6 +39,8 @@ runTest :: PD.PackageDescription
         -> IO TestSuiteLog
 runTest pkg_descr lbi flags suite = do
     let isCoverageEnabled = fromFlag $ configCoverage $ LBI.configFlags lbi
+        way = guessWay lbi
+        tixDir_ = tixDir distPref way $ PD.testName suite
 
     pwd <- getCurrentDirectory
     existingEnv <- getEnvironment
@@ -50,12 +54,11 @@ runTest pkg_descr lbi flags suite = do
 
     -- Remove old .tix files if appropriate.
     unless (fromFlag $ testKeepTix flags) $ do
-        let tDir = tixDir distPref $ PD.testName suite
-        exists' <- doesDirectoryExist tDir
-        when exists' $ removeDirectoryRecursive tDir
+        exists' <- doesDirectoryExist tixDir_
+        when exists' $ removeDirectoryRecursive tixDir_
 
     -- Create directory for HPC files.
-    createDirectoryIfMissing True $ tixDir distPref $ PD.testName suite
+    createDirectoryIfMissing True tixDir_
 
     -- Write summary notices indicating start of test suite
     notice verbosity $ summarizeSuiteStart $ PD.testName suite
@@ -74,11 +77,21 @@ runTest pkg_descr lbi flags suite = do
     let opts = map (testOption pkg_descr lbi suite)
                    (testOptions flags)
         dataDirPath = pwd </> PD.dataDir pkg_descr
-        tixFile = pwd </> tixFilePath distPref (PD.testName suite)
+        tixFile = pwd </> tixFilePath distPref way (PD.testName suite)
         pkgPathEnv = (pkgPathEnvVar pkg_descr "datadir", dataDirPath)
                    : existingEnv
         shellEnv = [("HPCTIXFILE", tixFile) | isCoverageEnabled] ++ pkgPathEnv
-    exit <- rawSystemIOWithEnv verbosity cmd opts Nothing (Just shellEnv)
+
+    -- Add (DY)LD_LIBRARY_PATH if needed
+    shellEnv' <- if LBI.withDynExe lbi
+                    then do let (Platform _ os) = LBI.hostPlatform lbi
+                                clbi = LBI.getComponentLocalBuildInfo lbi
+                                         (LBI.CTestName (PD.testName suite))
+                            paths <- LBI.depLibraryPaths True False lbi clbi
+                            return (addLibraryPath os paths shellEnv)
+                    else return shellEnv
+
+    exit <- rawSystemIOWithEnv verbosity cmd opts Nothing (Just shellEnv')
                                -- these handles are automatically closed
                                Nothing (Just wOut) (Just wOut)
 
@@ -151,5 +164,5 @@ testOption pkg_descr lbi suite template =
   where
     env = initialPathTemplateEnv
           (PD.package pkg_descr) (LBI.pkgKey lbi)
-          (compilerId $ LBI.compiler lbi) (LBI.hostPlatform lbi) ++
+          (compilerInfo $ LBI.compiler lbi) (LBI.hostPlatform lbi) ++
           [(TestSuiteNameVar, toPathTemplate $ PD.testName suite)]

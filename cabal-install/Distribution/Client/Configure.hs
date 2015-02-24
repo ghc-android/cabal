@@ -31,8 +31,7 @@ import Distribution.Client.Targets
          ( userToPackageConstraint )
 
 import Distribution.Simple.Compiler
-         ( CompilerId(..), Compiler(compilerId)
-         , PackageDB(..), PackageDBStack )
+         ( Compiler, CompilerInfo, compilerInfo, PackageDB(..), PackageDBStack )
 import Distribution.Simple.Program (ProgramConfiguration )
 import Distribution.Simple.Setup
          ( ConfigFlags(..), fromFlag, toFlag, flagToMaybe, fromFlagOrDefault )
@@ -161,7 +160,7 @@ planLocalPackage :: Verbosity -> Compiler
 planLocalPackage verbosity comp platform configFlags configExFlags installedPkgIndex
   (SourcePackageDb _ packagePrefs) = do
   pkg <- readPackageDescription verbosity =<< defaultPackageDesc verbosity
-  solver <- chooseSolver verbosity (fromFlag $ configSolver configExFlags) (compilerId comp)
+  solver <- chooseSolver verbosity (fromFlag $ configSolver configExFlags) (compilerInfo comp)
 
   let -- We create a local package and ask to resolve a dependency on it
       localPkg = SourcePackage {
@@ -208,7 +207,7 @@ planLocalPackage verbosity comp platform configFlags configExFlags installedPkgI
             (SourcePackageDb mempty packagePrefs)
             [SpecificSourcePackage localPkg]
 
-  return (resolveDependencies platform (compilerId comp) solver resolverParams)
+  return (resolveDependencies platform (compilerInfo comp) solver resolverParams)
 
 
 -- | Call an installer for an 'SourcePackage' but override the configure
@@ -220,7 +219,7 @@ planLocalPackage verbosity comp platform configFlags configExFlags installedPkgI
 -- NB: when updating this function, don't forget to also update
 -- 'installReadyPackage' in D.C.Install.
 configurePackage :: Verbosity
-                 -> Platform -> CompilerId
+                 -> Platform -> CompilerInfo
                  -> SetupScriptOptions
                  -> ConfigFlags
                  -> ReadyPackage

@@ -24,7 +24,10 @@ module Distribution.Simple.Compiler (
         -- * Haskell implementations
         module Distribution.Compiler,
         Compiler(..),
-        showCompilerId, compilerFlavor, compilerVersion,
+        showCompilerId, showCompilerIdWithAbi,
+        compilerFlavor, compilerVersion,
+        compilerCompatVersion,
+        compilerInfo,
 
         -- * Support for package databases
         PackageDB(..),
@@ -36,6 +39,10 @@ module Distribution.Simple.Compiler (
         -- * Support for optimisation levels
         OptimisationLevel(..),
         flagToOptimisationLevel,
+
+        -- * Support for debug info levels
+        DebugInfoLevel(..),
+        flagToDebugInfoLevel,
 
         -- * Support for language extensions
         Flag,
@@ -55,16 +62,20 @@ import Distribution.Text (display)
 import Language.Haskell.Extension (Language(Haskell98), Extension)
 
 import Control.Monad (liftM)
-import Data.Binary (Binary)
+import Distribution.Compat.Binary (Binary)
 import Data.List (nub)
 import qualified Data.Map as M (Map, lookup)
-import Data.Maybe (catMaybes, isNothing)
+import Data.Maybe (catMaybes, isNothing, listToMaybe)
 import GHC.Generics (Generic)
 import System.Directory (canonicalizePath)
 
 data Compiler = Compiler {
         compilerId              :: CompilerId,
         -- ^ Compiler flavour and version.
+        compilerAbiTag          :: AbiTag,
+        -- ^ Tag for distinguishing incompatible ABI's on the same architecture/os.
+        compilerCompat          :: [CompilerId],
+        -- ^ Other implementations that this compiler claims to be compatible with.
         compilerLanguages       :: [(Language, Flag)],
         -- ^ Supported language standards.
         compilerExtensions      :: [(Extension, Flag)],
@@ -79,11 +90,31 @@ instance Binary Compiler
 showCompilerId :: Compiler -> String
 showCompilerId = display . compilerId
 
+showCompilerIdWithAbi :: Compiler -> String
+showCompilerIdWithAbi comp =
+  display (compilerId comp) ++
+  case compilerAbiTag comp of
+    NoAbiTag  -> []
+    AbiTag xs -> '-':xs
+
 compilerFlavor ::  Compiler -> CompilerFlavor
 compilerFlavor = (\(CompilerId f _) -> f) . compilerId
 
 compilerVersion :: Compiler -> Version
 compilerVersion = (\(CompilerId _ v) -> v) . compilerId
+
+compilerCompatVersion :: CompilerFlavor -> Compiler -> Maybe Version
+compilerCompatVersion flavor comp
+  | compilerFlavor comp == flavor = Just (compilerVersion comp)
+  | otherwise    =
+      listToMaybe [ v | CompilerId fl v <- compilerCompat comp, fl == flavor ]
+
+compilerInfo :: Compiler -> CompilerInfo
+compilerInfo c = CompilerInfo (compilerId c)
+                              (compilerAbiTag c)
+                              (Just . compilerCompat $ c)
+                              (Just . map fst . compilerLanguages $ c)
+                              (Just . map fst . compilerExtensions $ c)
 
 -- ------------------------------------------------------------
 -- * Package databases
@@ -167,6 +198,33 @@ flagToOptimisationLevel (Just s) = case reads s of
   _             -> error $ "Can't parse optimisation level " ++ s
 
 -- ------------------------------------------------------------
+-- * Debug info levels
+-- ------------------------------------------------------------
+
+-- | Some compilers support emitting debug info. Some have different
+-- levels.  For compilers that do not the level is just capped to the
+-- level they do support.
+--
+data DebugInfoLevel = NoDebugInfo
+                    | MinimalDebugInfo
+                    | NormalDebugInfo
+                    | MaximalDebugInfo
+    deriving (Bounded, Enum, Eq, Generic, Read, Show)
+
+instance Binary DebugInfoLevel
+
+flagToDebugInfoLevel :: Maybe String -> DebugInfoLevel
+flagToDebugInfoLevel Nothing  = NormalDebugInfo
+flagToDebugInfoLevel (Just s) = case reads s of
+  [(i, "")]
+    | i >= fromEnum (minBound :: DebugInfoLevel)
+   && i <= fromEnum (maxBound :: DebugInfoLevel)
+                -> toEnum i
+    | otherwise -> error $ "Bad debug info level: " ++ show i
+                        ++ ". Valid values are 0..3"
+  _             -> error $ "Can't parse debug info level " ++ s
+
+-- ------------------------------------------------------------
 -- * Languages and Extensions
 -- ------------------------------------------------------------
 
@@ -220,7 +278,10 @@ packageKeySupported = ghcSupported "Uses package keys"
 ghcSupported :: String -> Compiler -> Bool
 ghcSupported key comp =
   case compilerFlavor comp of
-    GHC -> case M.lookup key (compilerProperties comp) of
-      Just "YES" -> True
-      _          -> False
-    _   -> False
+    GHC   -> checkProp
+    GHCJS -> checkProp
+    _     -> False
+  where checkProp =
+          case M.lookup key (compilerProperties comp) of
+            Just "YES" -> True
+            _          -> False

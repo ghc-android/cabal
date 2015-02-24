@@ -53,7 +53,7 @@ import Distribution.Utils.NubList
          ( NubList, fromNubList, toNubList)
 
 import Distribution.Simple.Compiler
-         ( OptimisationLevel(..) )
+         ( DebugInfoLevel(..), OptimisationLevel(..) )
 import Distribution.Simple.Setup
          ( ConfigFlags(..), configureOptions, defaultConfigFlags
          , HaddockFlags(..), haddockOptions, defaultHaddockFlags
@@ -263,6 +263,7 @@ instance Monoid SavedConfig where
         -- TODO: NubListify
         configConfigureArgs       = lastNonEmpty configConfigureArgs,
         configOptimization        = combine configOptimization,
+        configDebugInfo           = combine configDebugInfo,
         configProgPrefix          = combine configProgPrefix,
         configProgSuffix          = combine configProgSuffix,
         -- Parametrised by (Flag PathTemplate), so safe to use 'mappend'.
@@ -295,7 +296,8 @@ instance Monoid SavedConfig where
         configCoverage            = combine configCoverage,
         configLibCoverage         = combine configLibCoverage,
         configExactConfiguration  = combine configExactConfiguration,
-        configFlagError           = combine configFlagError
+        configFlagError           = combine configFlagError,
+        configRelocatable         = combine configRelocatable
         }
         where
           combine        = combine'        savedConfigureFlags
@@ -588,7 +590,7 @@ configFieldDescriptions :: [FieldDescr SavedConfig]
 configFieldDescriptions =
 
      toSavedConfig liftGlobalFlag
-       (commandOptions globalCommand ParseArgs)
+       (commandOptions (globalCommand []) ParseArgs)
        ["version", "numeric-version", "config-file", "sandbox-config-file"] []
 
   ++ toSavedConfig liftConfigFlag
@@ -602,10 +604,11 @@ configFieldDescriptions =
        [simpleField "compiler"
           (fromFlagOrDefault Disp.empty . fmap Text.disp) (optional Text.parse)
           configHcFlavor (\v flags -> flags { configHcFlavor = v })
-        -- TODO: The following is a temporary fix. The "optimization" field is
-        -- OptArg, and viewAsFieldDescr fails on that. Instead of a hand-written
-        -- hackaged parser and printer, we should handle this case properly in
-        -- the library.
+        -- TODO: The following is a temporary fix. The "optimization"
+        -- and "debug-info" fields are OptArg, and viewAsFieldDescr
+        -- fails on that. Instead of a hand-written hackaged parser
+        -- and printer, we should handle this case properly in the
+        -- library.
        ,liftField configOptimization (\v flags -> flags { configOptimization = v }) $
         let name = "optimization" in
         FieldDescr name
@@ -622,6 +625,29 @@ configFieldDescriptions =
              |  str == "2"     -> ParseOk [] (Flag MaximumOptimisation)
              | lstr == "false" -> ParseOk [caseWarning] (Flag NoOptimisation)
              | lstr == "true"  -> ParseOk [caseWarning] (Flag NormalOptimisation)
+             | otherwise       -> ParseFailed (NoParse name line)
+             where
+               lstr = lowercase str
+               caseWarning = PWarning $
+                 "The '" ++ name ++ "' field is case sensitive, use 'True' or 'False'.")
+       ,liftField configDebugInfo (\v flags -> flags { configDebugInfo = v }) $
+        let name = "debug-info" in
+        FieldDescr name
+          (\f -> case f of
+                   Flag NoDebugInfo      -> Disp.text "False"
+                   Flag MinimalDebugInfo -> Disp.text "1"
+                   Flag NormalDebugInfo  -> Disp.text "True"
+                   Flag MaximalDebugInfo -> Disp.text "3"
+                   _                     -> Disp.empty)
+          (\line str _ -> case () of
+           _ |  str == "False" -> ParseOk [] (Flag NoDebugInfo)
+             |  str == "True"  -> ParseOk [] (Flag NormalDebugInfo)
+             |  str == "0"     -> ParseOk [] (Flag NoDebugInfo)
+             |  str == "1"     -> ParseOk [] (Flag MinimalDebugInfo)
+             |  str == "2"     -> ParseOk [] (Flag NormalDebugInfo)
+             |  str == "3"     -> ParseOk [] (Flag MaximalDebugInfo)
+             | lstr == "false" -> ParseOk [caseWarning] (Flag NoDebugInfo)
+             | lstr == "true"  -> ParseOk [caseWarning] (Flag NormalDebugInfo)
              | otherwise       -> ParseFailed (NoParse name line)
              where
                lstr = lowercase str

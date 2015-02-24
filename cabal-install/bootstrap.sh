@@ -134,9 +134,13 @@ while [ "$#" -gt 0 ]; do
       echo "usage: bootstrap.sh [OPTION]"
       echo
       echo "options:"
-      echo "   --user    Install for the local user (default)"
-      echo "   --global  Install systemwide (must be run as root)"
-      echo "   --no-doc  Do not generate documentation for installed packages"
+      echo "   --user          Install for the local user (default)"
+      echo "   --global        Install systemwide (must be run as root)"
+      echo "   --no-doc        Do not generate documentation for installed "\
+           "packages"
+      echo "   --sandbox       Install to a sandbox in the default location"\
+           "(.cabal-sandbox)"
+      echo "   --sandbox path  Install to a sandbox located at path"
       exit;;
   esac
 done
@@ -174,34 +178,43 @@ PREFIX=${PREFIX:-${DEFAULT_PREFIX}}
 
 # Versions of the packages to install.
 # The version regex says what existing installed versions are ok.
-PARSEC_VER="3.1.6";    PARSEC_VER_REGEXP="[23]\."
-                       # == 2.* || == 3.*
-DEEPSEQ_VER="1.3.0.2"; DEEPSEQ_VER_REGEXP="1\.[1-9]\."
+PARSEC_VER="3.1.8";    PARSEC_VER_REGEXP="[3]\.[01]\."
+                       # >= 3.0 && < 3.2
+DEEPSEQ_VER="1.4.0.0"; DEEPSEQ_VER_REGEXP="1\.[1-9]\."
                        # >= 1.1 && < 2
-TEXT_VER="1.2.0.0";    TEXT_VER_REGEXP="((1\.[012]\.)|(0\.([2-9]|(1[0-1]))\.))"
+BINARY_VER="0.7.2.3";  BINARY_VER_REGEXP="[0]\.[7]\."
+                       # == 0.7.*
+TEXT_VER="1.2.0.4";    TEXT_VER_REGEXP="((1\.[012]\.)|(0\.([2-9]|(1[0-1]))\.))"
                        # >= 0.2 && < 1.3
 NETWORK_VER="2.6.0.2"; NETWORK_VER_REGEXP="2\.[0-6]\."
                        # >= 2.0 && < 2.7
-NETWORK_URI_VER="2.6.0.1"; NETWORK_URI_VER_REGEXP="2\.[0-6]\."
-                       # >= 2.0 && < 2.7
-CABAL_VER="1.21.1.0";  CABAL_VER_REGEXP="1\.21\.1"
-                       # >= 1.21.1 && < 1.22
-TRANS_VER="0.3.0.0";   TRANS_VER_REGEXP="0\.[23]\."
-                       # >= 0.2.* && < 0.4.*
-MTL_VER="2.1.3.1";     MTL_VER_REGEXP="[2]\."
-                       #  == 2.*
-HTTP_VER="4000.2.18";  HTTP_VER_REGEXP="4000\.2\.([5-9]|1[0-9]|2[0-9])"
+NETWORK_URI_VER="2.6.0.1"; NETWORK_URI_VER_REGEXP="2\.6\."
+                       # >= 2.6 && < 2.7
+CABAL_VER="1.23.0.0";  CABAL_VER_REGEXP="1\.23\."
+                       # >= 1.23 && < 1.24
+TRANS_VER="0.4.2.0";   TRANS_VER_REGEXP="0\.[4]\."
+                       # >= 0.2.* && < 0.5
+MTL_VER="2.2.1";       MTL_VER_REGEXP="[2]\."
+                       #  >= 2.0 && < 3
+HTTP_VER="4000.2.19";  HTTP_VER_REGEXP="4000\.2\.([5-9]|1[0-9]|2[0-9])"
                        # >= 4000.2.5 < 4000.3
-ZLIB_VER="0.5.4.1";    ZLIB_VER_REGEXP="0\.[45]\."
+ZLIB_VER="0.5.4.2";    ZLIB_VER_REGEXP="0\.[45]\."
                        # == 0.4.* || == 0.5.*
-TIME_VER="1.4.2"       TIME_VER_REGEXP="1\.[1234]\.?"
-                       # >= 1.1 && < 1.5
+TIME_VER="1.5.0.1"     TIME_VER_REGEXP="1\.[12345]\.?"
+                       # >= 1.1 && < 1.6
 RANDOM_VER="1.1"       RANDOM_VER_REGEXP="1\.[01]\.?"
                        # >= 1 && < 1.2
-STM_VER="2.4.3";       STM_VER_REGEXP="2\."
+STM_VER="2.4.4";       STM_VER_REGEXP="2\."
                        # == 2.*
+OLD_TIME_VER="1.1.0.3"; OLD_TIME_VER_REGEXP="1\.[01]\.?"
+                       # >=1.0.0.0 && <1.2
+OLD_LOCALE_VER="1.0.0.7"; OLD_LOCALE_VER_REGEXP="1\.0\.?"
+                       # >=1.0.0.0 && <1.1
 
 HACKAGE_URL="https://hackage.haskell.org/package"
+
+# Haddock fails for network-2.5.0.0.
+NO_DOCS_PACKAGES_VER_REGEXP="network-uri-2\.5\.[0-9]+\.[0-9]+"
 
 # Cache the list of packages:
 echo "Checking installed packages for ghc-${GHC_VER}..."
@@ -274,6 +287,7 @@ unpack_pkg () {
 
 install_pkg () {
   PKG=$1
+  VER=$2
 
   [ -x Setup ] && ./Setup clean
   [ -f Setup ] && rm Setup
@@ -294,8 +308,13 @@ install_pkg () {
 
   if [ ! ${NO_DOCUMENTATION} ]
   then
-    ./Setup haddock --with-ghc=${GHC} --with-haddock=${HADDOCK} ${VERBOSE} ||
-      die "Documenting the ${PKG} package failed."
+    if echo "${PKG}-${VER}" | egrep ${NO_DOCS_PACKAGES_VER_REGEXP} > /dev/null 2>&1
+    then
+      echo "Skipping documentation for the ${PKG} package."
+    else
+      ./Setup haddock --with-ghc=${GHC} --with-haddock=${HADDOCK} ${VERBOSE} ||
+        die "Documenting the ${PKG} package failed."
+    fi
   fi
 
   ./Setup install ${EXTRA_INSTALL_OPTS} ${VERBOSE} ||
@@ -324,9 +343,29 @@ do_pkg () {
   fi
 }
 
+# Replicate the flag selection logic for network-uri in the .cabal file.
+do_network_uri_pkg () {
+  # Refresh installed package list.
+  ${GHC_PKG} list --global ${SCOPE_OF_INSTALLATION} > ghc-pkg-stage2.list \
+    || die "running '${GHC_PKG} list' failed"
+
+  NETWORK_URI_DUMMY_VER="2.5.0.0"; NETWORK_URI_DUMMY_VER_REGEXP="2\.5\." # < 2.6
+  if egrep " network-2\.[6-9]\." ghc-pkg-stage2.list > /dev/null 2>&1
+  then
+    # Use network >= 2.6 && network-uri >= 2.6
+    info_pkg "network-uri" ${NETWORK_URI_VER} ${NETWORK_URI_VER_REGEXP}
+    do_pkg   "network-uri" ${NETWORK_URI_VER} ${NETWORK_URI_VER_REGEXP}
+  else
+    # Use network < 2.6 && network-uri < 2.6
+    info_pkg "network-uri" ${NETWORK_URI_DUMMY_VER} ${NETWORK_URI_DUMMY_VER_REGEXP}
+    do_pkg   "network-uri" ${NETWORK_URI_DUMMY_VER} ${NETWORK_URI_DUMMY_VER_REGEXP}
+  fi
+}
+
 # Actually do something!
 
 info_pkg "deepseq"      ${DEEPSEQ_VER} ${DEEPSEQ_VER_REGEXP}
+info_pkg "binary"       ${BINARY_VER}  ${BINARY_VER_REGEXP}
 info_pkg "time"         ${TIME_VER}    ${TIME_VER_REGEXP}
 info_pkg "Cabal"        ${CABAL_VER}   ${CABAL_VER_REGEXP}
 info_pkg "transformers" ${TRANS_VER}   ${TRANS_VER_REGEXP}
@@ -334,13 +373,15 @@ info_pkg "mtl"          ${MTL_VER}     ${MTL_VER_REGEXP}
 info_pkg "text"         ${TEXT_VER}    ${TEXT_VER_REGEXP}
 info_pkg "parsec"       ${PARSEC_VER}  ${PARSEC_VER_REGEXP}
 info_pkg "network"      ${NETWORK_VER} ${NETWORK_VER_REGEXP}
-info_pkg "network-uri"  ${NETWORK_URI_VER} ${NETWORK_URI_VER_REGEXP}
+info_pkg "old-locale"   ${OLD_LOCALE_VER} ${OLD_LOCALE_VER_REGEXP}
+info_pkg "old-time"     ${OLD_TIME_VER} ${OLD_TIME_VER_REGEXP}
 info_pkg "HTTP"         ${HTTP_VER}    ${HTTP_VER_REGEXP}
 info_pkg "zlib"         ${ZLIB_VER}    ${ZLIB_VER_REGEXP}
 info_pkg "random"       ${RANDOM_VER}  ${RANDOM_VER_REGEXP}
 info_pkg "stm"          ${STM_VER}     ${STM_VER_REGEXP}
 
 do_pkg   "deepseq"      ${DEEPSEQ_VER} ${DEEPSEQ_VER_REGEXP}
+do_pkg   "binary"       ${BINARY_VER}  ${BINARY_VER_REGEXP}
 do_pkg   "time"         ${TIME_VER}    ${TIME_VER_REGEXP}
 do_pkg   "Cabal"        ${CABAL_VER}   ${CABAL_VER_REGEXP}
 do_pkg   "transformers" ${TRANS_VER}   ${TRANS_VER_REGEXP}
@@ -348,7 +389,12 @@ do_pkg   "mtl"          ${MTL_VER}     ${MTL_VER_REGEXP}
 do_pkg   "text"         ${TEXT_VER}    ${TEXT_VER_REGEXP}
 do_pkg   "parsec"       ${PARSEC_VER}  ${PARSEC_VER_REGEXP}
 do_pkg   "network"      ${NETWORK_VER} ${NETWORK_VER_REGEXP}
-do_pkg   "network-uri"  ${NETWORK_URI_VER} ${NETWORK_URI_VER_REGEXP}
+
+# We conditionally install network-uri, depending on the network version.
+do_network_uri_pkg
+
+do_pkg   "old-locale"   ${OLD_LOCALE_VER} ${OLD_LOCALE_VER_REGEXP}
+do_pkg   "old-time"     ${OLD_TIME_VER} ${OLD_TIME_VER_REGEXP}
 do_pkg   "HTTP"         ${HTTP_VER}    ${HTTP_VER_REGEXP}
 do_pkg   "zlib"         ${ZLIB_VER}    ${ZLIB_VER_REGEXP}
 do_pkg   "random"       ${RANDOM_VER}  ${RANDOM_VER_REGEXP}

@@ -11,6 +11,7 @@ module Distribution.Simple.Program.GHC (
 
   ) where
 
+import Distribution.Simple.GHC.ImplInfo ( getImplInfo, GhcImplInfo(..) )
 import Distribution.Package
 import Distribution.PackageDescription hiding (Flag)
 import Distribution.ModuleName
@@ -21,8 +22,7 @@ import Distribution.Simple.Program.Types
 import Distribution.Simple.Program.Run
 import Distribution.Text
 import Distribution.Verbosity
-import Distribution.Utils.NubList (NubListR, fromNubListR)
-import Distribution.Version
+import Distribution.Utils.NubList   ( NubListR, fromNubListR )
 import Language.Haskell.Extension   ( Language(..), Extension(..) )
 
 import qualified Data.Map as M
@@ -152,6 +152,9 @@ data GhcOptions = GhcOptions {
   -- | What optimisation level to use; the @ghc -O@ flag.
   ghcOptOptimisation  :: Flag GhcOptimisation,
 
+    -- | Emit debug info; the @ghc -g@ flag.
+  ghcOptDebugInfo  :: Flag Bool,
+
   -- | Compile in profiling mode; the @ghc -prof@ flag.
   ghcOptProfilingMode :: Flag Bool,
 
@@ -189,6 +192,7 @@ data GhcOptions = GhcOptions {
   ghcOptShared        :: Flag Bool,
   ghcOptFPic          :: Flag Bool,
   ghcOptDylibName     :: Flag String,
+  ghcOptRPaths        :: NubListR FilePath,
 
   ---------------
   -- Misc flags
@@ -233,12 +237,11 @@ ghcInvocation :: ConfiguredProgram -> Compiler -> GhcOptions -> ProgramInvocatio
 ghcInvocation prog comp opts =
     programInvocation prog (renderGhcOptions comp opts)
 
-
 renderGhcOptions :: Compiler -> GhcOptions -> [String]
 renderGhcOptions comp opts
-  | compilerFlavor comp /= GHC =
+  | compilerFlavor comp `notElem` [GHC, GHCJS] =
     error $ "Distribution.Simple.Program.GHC.renderGhcOptions: "
-    ++ "compiler flavor must be 'GHC'!"
+    ++ "compiler flavor must be 'GHC' or 'GHCJS'!"
   | otherwise =
   concat
   [ case flagToMaybe (ghcOptMode opts) of
@@ -260,7 +263,8 @@ renderGhcOptions comp opts
 
   , maybe [] verbosityOpts (flagToMaybe (ghcOptVerbosity opts))
 
-  , [ "-fbuilding-cabal-package" | flagBool ghcOptCabal, ver >= [6,11] ]
+  , [ "-fbuilding-cabal-package" | flagBool ghcOptCabal
+                                 , flagBuildingCabalPkg implInfo ]
 
   ----------------
   -- Compilation
@@ -271,6 +275,8 @@ renderGhcOptions comp opts
       Just GhcNormalOptimisation      -> ["-O"]
       Just GhcMaximumOptimisation     -> ["-O2"]
       Just (GhcSpecialOptimisation s) -> ["-O" ++ s] -- eg -Odph
+
+  , [ "-g" | flagDebugInfo implInfo && flagBool ghcOptDebugInfo ]
 
   , [ "-prof" | flagBool ghcOptProfilingMode ]
 
@@ -306,10 +312,12 @@ renderGhcOptions comp opts
   , concat [ ["-hisuf",   suf] | suf <- flag ghcOptHiSuffix  ]
   , concat [ ["-dynosuf", suf] | suf <- flag ghcOptDynObjSuffix ]
   , concat [ ["-dynhisuf",suf] | suf <- flag ghcOptDynHiSuffix  ]
-  , concat [ ["-outputdir", dir] | dir <- flag ghcOptOutputDir, ver >= [6,10] ]
+  , concat [ ["-outputdir", dir] | dir <- flag ghcOptOutputDir
+                                 , flagOutputDir implInfo ]
   , concat [ ["-odir",    dir] | dir <- flag ghcOptObjDir ]
   , concat [ ["-hidir",   dir] | dir <- flag ghcOptHiDir  ]
-  , concat [ ["-stubdir", dir] | dir <- flag ghcOptStubDir, ver >= [6,8] ]
+  , concat [ ["-stubdir", dir] | dir <- flag ghcOptStubDir
+                               , flagStubdir implInfo ]
 
   -----------------------
   -- Source search path
@@ -325,7 +333,7 @@ renderGhcOptions comp opts
   , concat [ [ "-optP-include", "-optP" ++ inc]
            | inc <- flags ghcOptCppIncludes ]
   , [ "-#include \"" ++ inc ++ "\""
-    | inc <- flags ghcOptFfiIncludes, ver < [6,11] ]
+    | inc <- flags ghcOptFfiIncludes, flagFfiIncludes implInfo ]
   , [ "-optc" ++ opt | opt <- flags ghcOptCcOptions ]
 
   -----------------
@@ -336,6 +344,9 @@ renderGhcOptions comp opts
   , ["-L" ++ dir     | dir <- flags ghcOptLinkLibPath ]
   , concat [ ["-framework", fmwk] | fmwk <- flags ghcOptLinkFrameworks ]
   , [ "-no-hs-main"  | flagBool ghcOptLinkNoHsMain ]
+  , [ "-dynload deploy" | not (null (flags ghcOptRPaths)) ]
+  , concat [ [ "-optl-Wl,-rpath," ++ dir]
+           | dir <- flags ghcOptRPaths ]
 
   -------------
   -- Packages
@@ -348,7 +359,7 @@ renderGhcOptions comp opts
   , [ "-hide-all-packages"     | flagBool ghcOptHideAllPackages ]
   , [ "-no-auto-link-packages" | flagBool ghcOptNoAutoLinkPackages ]
 
-  , packageDbArgs version (ghcOptPackageDBs opts)
+  , packageDbArgs implInfo (ghcOptPackageDBs opts)
 
   , if null (ghcOptSigOf opts)
         then []
@@ -359,7 +370,7 @@ renderGhcOptions comp opts
                                     (ghcOptSigOf opts))
              : []
 
-  , concat $ if ver >= [6,11]
+  , concat $ if flagPackageId implInfo
       then let space "" = ""
                space xs = ' ' : xs
            in [ ["-package-id", display ipkgid ++ space (display rns)]
@@ -370,7 +381,7 @@ renderGhcOptions comp opts
   ----------------------------
   -- Language and extensions
 
-  , if ver >= [7]
+  , if supportsHaskell2010 implInfo
     then [ "-X" ++ display lang | lang <- flag ghcOptLanguage ]
     else []
 
@@ -384,7 +395,7 @@ renderGhcOptions comp opts
   -- GHCi
 
   , concat [ [ "-ghci-script", script ] | script <- flags  ghcOptGHCiScripts
-                                        , ver >= [7,2] ]
+                                        , flagGhciScript implInfo ]
 
   ---------------
   -- Inputs
@@ -404,11 +415,10 @@ renderGhcOptions comp opts
 
 
   where
+    implInfo     = getImplInfo comp
     flag     flg = flagToList (flg opts)
     flags    flg = fromNubListR . flg $ opts
     flagBool flg = fromFlagOrDefault False (flg opts)
-
-    version@(Version ver _) = compilerVersion comp
 
 verbosityOpts :: Verbosity -> [String]
 verbosityOpts verbosity
@@ -417,8 +427,8 @@ verbosityOpts verbosity
   | otherwise              = ["-w", "-v0"]
 
 
-packageDbArgs :: Version -> PackageDBStack -> [String]
-packageDbArgs (Version ver _) dbstack = case dbstack of
+packageDbArgs :: GhcImplInfo -> PackageDBStack -> [String]
+packageDbArgs implInfo dbstack = case dbstack of
   (GlobalPackageDB:UserPackageDB:dbs) -> concatMap specific dbs
   (GlobalPackageDB:dbs)               -> ("-no-user-" ++ packageDbFlag)
                                        : concatMap specific dbs
@@ -428,9 +438,8 @@ packageDbArgs (Version ver _) dbstack = case dbstack of
     specific _ = ierror
     ierror     = error $ "internal error: unexpected package db stack: "
                       ++ show dbstack
-
     packageDbFlag
-      | ver < [7,5]
+      | flagPackageConf implInfo
       = "package-conf"
       | otherwise
       = "package-db"
@@ -471,6 +480,7 @@ instance Monoid GhcOptions where
     ghcOptExtensions         = mempty,
     ghcOptExtensionMap       = mempty,
     ghcOptOptimisation       = mempty,
+    ghcOptDebugInfo          = mempty,
     ghcOptProfilingMode      = mempty,
     ghcOptSplitObjs          = mempty,
     ghcOptNumJobs            = mempty,
@@ -488,6 +498,7 @@ instance Monoid GhcOptions where
     ghcOptShared             = mempty,
     ghcOptFPic               = mempty,
     ghcOptDylibName          = mempty,
+    ghcOptRPaths             = mempty,
     ghcOptVerbosity          = mempty,
     ghcOptCabal              = mempty
   }
@@ -522,6 +533,7 @@ instance Monoid GhcOptions where
     ghcOptExtensions         = combine ghcOptExtensions,
     ghcOptExtensionMap       = combine ghcOptExtensionMap,
     ghcOptOptimisation       = combine ghcOptOptimisation,
+    ghcOptDebugInfo          = combine ghcOptDebugInfo,
     ghcOptProfilingMode      = combine ghcOptProfilingMode,
     ghcOptSplitObjs          = combine ghcOptSplitObjs,
     ghcOptNumJobs            = combine ghcOptNumJobs,
@@ -539,6 +551,7 @@ instance Monoid GhcOptions where
     ghcOptShared             = combine ghcOptShared,
     ghcOptFPic               = combine ghcOptFPic,
     ghcOptDylibName          = combine ghcOptDylibName,
+    ghcOptRPaths             = combine ghcOptRPaths,
     ghcOptVerbosity          = combine ghcOptVerbosity,
     ghcOptCabal              = combine ghcOptCabal
   }

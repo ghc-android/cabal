@@ -19,18 +19,18 @@ import Distribution.PackageDescription
 import Distribution.Verbosity (silent)
 import Distribution.System (buildPlatform)
 import Distribution.Compiler
-        ( CompilerId(..), CompilerFlavor(..) )
+        ( CompilerId(..), CompilerFlavor(..), unknownCompilerInfo, AbiTag(..) )
 import Distribution.Text
 
 suite :: FilePath -> Test
 suite ghcPath = TestCase $ do
     let dir = "PackageTests" </> "BenchmarkStanza"
         pdFile = dir </> "my" <.> "cabal"
-        spec = PackageSpec dir []
+        spec = PackageSpec { directory = dir, configOpts = [], distPref = Nothing }
     result <- cabal_configure spec ghcPath
     assertOutputDoesNotContain "unknown section type" result
     genPD <- readPackageDescription silent pdFile
-    let compiler = CompilerId GHC $ Version [6, 12, 2] []
+    let compiler = unknownCompilerInfo (CompilerId GHC $ Version [6, 12, 2] []) NoAbiTag
         anticipatedBenchmark = emptyBenchmark
             { benchmarkName = "dummy"
             , benchmarkInterface = BenchmarkExeV10 (Version [1,0] []) "dummy.hs"

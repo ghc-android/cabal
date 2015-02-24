@@ -42,25 +42,28 @@ import Distribution.Simple.LocalBuildInfo
          , LibraryName(..)
          , InstallDirs(..), absoluteInstallDirs )
 import Distribution.Simple.BuildPaths (haddockName)
-import qualified Distribution.Simple.GHC  as GHC
-import qualified Distribution.Simple.LHC  as LHC
-import qualified Distribution.Simple.UHC  as UHC
+
+import qualified Distribution.Simple.GHC   as GHC
+import qualified Distribution.Simple.GHCJS as GHCJS
+import qualified Distribution.Simple.LHC   as LHC
+import qualified Distribution.Simple.UHC   as UHC
 import qualified Distribution.Simple.HaskellSuite as HaskellSuite
+
 import Distribution.Simple.Compiler
          ( compilerVersion, Compiler, CompilerFlavor(..), compilerFlavor
-         , PackageDBStack, registrationPackageDB )
+         , PackageDB, PackageDBStack, absolutePackageDBPaths
+         , registrationPackageDB )
 import Distribution.Simple.Program
-         ( ProgramConfiguration, ConfiguredProgram
-         , runProgramInvocation, requireProgram, lookupProgram
-         , ghcPkgProgram, lhcPkgProgram )
+         ( ProgramConfiguration, runProgramInvocation )
 import Distribution.Simple.Program.Script
          ( invocationAsSystemScript )
+import           Distribution.Simple.Program.HcPkg (HcPkgInfo)
 import qualified Distribution.Simple.Program.HcPkg as HcPkg
 import Distribution.Simple.Setup
          ( RegisterFlags(..), CopyDest(..)
          , fromFlag, fromFlagOrDefault, flagToMaybe )
 import Distribution.PackageDescription
-         ( PackageDescription(..), Library(..), BuildInfo(..) )
+         ( PackageDescription(..), Library(..), BuildInfo(..), libModules )
 import Distribution.Package
          ( Package(..), packageName, InstalledPackageId(..) )
 import Distribution.InstalledPackageInfo
@@ -69,7 +72,7 @@ import Distribution.InstalledPackageInfo
 import qualified Distribution.InstalledPackageInfo as IPI
 import Distribution.Simple.Utils
          ( writeUTF8File, writeFileAtomic, setFileExecutable
-         , die, notice, setupMessage )
+         , die, notice, setupMessage, shortRelativePath )
 import Distribution.System
          ( OS(..), buildOS )
 import Distribution.Text
@@ -98,8 +101,11 @@ register :: PackageDescription -> LocalBuildInfo
 register pkg@PackageDescription { library       = Just lib  } lbi regFlags
   = do
     let clbi = getComponentLocalBuildInfo lbi CLibName
+
+    absPackageDBs    <- absolutePackageDBPaths packageDbs
     installedPkgInfo <- generateRegistrationInfo
-                           verbosity pkg lib lbi clbi inplace distPref
+                           verbosity pkg lib lbi clbi inplace reloc distPref
+                           (registrationPackageDB absPackageDBs)
 
     when (fromFlag (regPrintId regFlags)) $ do
       putStrLn (display (IPI.installedPackageId installedPkgInfo))
@@ -119,6 +125,7 @@ register pkg@PackageDescription { library       = Just lib  } lbi regFlags
     modeGenerateRegScript = fromFlag (regGenScript regFlags)
 
     inplace   = fromFlag (regInPlace regFlags)
+    reloc     = relocatable lbi
     -- FIXME: there's really no guarantee this will work.
     -- registering into a totally different db stack can
     -- fail if dependencies cannot be satisfied.
@@ -133,13 +140,12 @@ register pkg@PackageDescription { library       = Just lib  } lbi regFlags
 
     writeRegisterScript installedPkgInfo =
       case compilerFlavor (compiler lbi) of
-        GHC  -> do (ghcPkg, _) <- requireProgram verbosity ghcPkgProgram (withPrograms lbi)
-                   writeHcPkgRegisterScript verbosity installedPkgInfo ghcPkg packageDbs
-        LHC  -> do (lhcPkg, _) <- requireProgram verbosity lhcPkgProgram (withPrograms lbi)
-                   writeHcPkgRegisterScript verbosity installedPkgInfo lhcPkg packageDbs
-        JHC  -> notice verbosity "Registration scripts not needed for jhc"
-        UHC  -> notice verbosity "Registration scripts not needed for uhc"
-        _    -> die "Registration scripts are not implemented for this compiler"
+        JHC -> notice verbosity "Registration scripts not needed for jhc"
+        UHC -> notice verbosity "Registration scripts not needed for uhc"
+        _   -> withHcPkg
+               "Registration scripts are not implemented for this compiler"
+               (compiler lbi) (withPrograms lbi)
+               (writeHcPkgRegisterScript verbosity installedPkgInfo packageDbs)
 
 register _ _ regFlags = notice verbosity "No package to register"
   where
@@ -152,9 +158,11 @@ generateRegistrationInfo :: Verbosity
                          -> LocalBuildInfo
                          -> ComponentLocalBuildInfo
                          -> Bool
+                         -> Bool
                          -> FilePath
+                         -> PackageDB
                          -> IO InstalledPackageInfo
-generateRegistrationInfo verbosity pkg lib lbi clbi inplace distPref = do
+generateRegistrationInfo verbosity pkg lib lbi clbi inplace reloc distPref packageDb = do
   --TODO: eliminate pwd!
   pwd <- getCurrentDirectory
 
@@ -166,37 +174,68 @@ generateRegistrationInfo verbosity pkg lib lbi clbi inplace distPref = do
      GHC | compilerVersion comp >= Version [6,11] [] -> do
             s <- GHC.libAbiHash verbosity pkg lbi lib clbi
             return (InstalledPackageId (display (packageId pkg) ++ '-':s))
+     GHCJS -> do
+            s <- GHCJS.libAbiHash verbosity pkg lbi lib clbi
+            return (InstalledPackageId (display (packageId pkg) ++ '-':s))
      _other -> do
             return (InstalledPackageId (display (packageId pkg)))
 
-  let installedPkgInfo
-        | inplace   = inplaceInstalledPackageInfo pwd distPref
-                        pkg ipid lib lbi clbi
-        | otherwise = absoluteInstalledPackageInfo
-                        pkg ipid lib lbi clbi
+  installedPkgInfo <-
+    if inplace
+      then return (inplaceInstalledPackageInfo pwd distPref
+                     pkg ipid lib lbi clbi)
+    else if reloc
+      then relocRegistrationInfo verbosity
+                     pkg lib lbi clbi ipid packageDb
+      else return (absoluteInstalledPackageInfo
+                     pkg ipid lib lbi clbi)
+
 
   return installedPkgInfo{ IPI.installedPackageId = ipid }
 
+relocRegistrationInfo :: Verbosity
+                      -> PackageDescription
+                      -> Library
+                      -> LocalBuildInfo
+                      -> ComponentLocalBuildInfo
+                      -> InstalledPackageId
+                      -> PackageDB
+                      -> IO InstalledPackageInfo
+relocRegistrationInfo verbosity pkg lib lbi clbi ipid packageDb =
+  case (compilerFlavor (compiler lbi)) of
+    GHC -> do fs <- GHC.pkgRoot verbosity lbi packageDb
+              return (relocatableInstalledPackageInfo
+                        pkg ipid lib lbi clbi fs)
+    _   -> die "Distribution.Simple.Register.relocRegistrationInfo: \
+               \not implemented for this compiler"
 
 -- | Create an empty package DB at the specified location.
 initPackageDB :: Verbosity -> Compiler -> ProgramConfiguration -> FilePath
                  -> IO ()
 initPackageDB verbosity comp conf dbPath =
-  case (compilerFlavor comp) of
-    GHC -> GHC.initPackageDB verbosity conf dbPath
+  case compilerFlavor comp of
     HaskellSuite {} -> HaskellSuite.initPackageDB verbosity conf dbPath
-    _   -> die "Distribution.Simple.Register.initPackageDB: \
-               \not implemented for this compiler"
+    _               -> withHcPkg "Distribution.Simple.Register.initPackageDB: \
+                                 \not implemented for this compiler" comp conf
+                                 (\hpi -> HcPkg.init hpi verbosity dbPath)
 
 -- | Run @hc-pkg@ using a given package DB stack, directly forwarding the
 -- provided command-line arguments to it.
 invokeHcPkg :: Verbosity -> Compiler -> ProgramConfiguration -> PackageDBStack
                 -> [String] -> IO ()
 invokeHcPkg verbosity comp conf dbStack extraArgs =
-    case (compilerFlavor comp) of
-      GHC -> GHC.invokeHcPkg verbosity conf dbStack extraArgs
-      _   -> die "Distribution.Simple.Register.invokeHcPkg: \
-                 \not implemented for this compiler"
+  withHcPkg "invokeHcPkg" comp conf
+    (\hpi -> HcPkg.invoke hpi verbosity dbStack extraArgs)
+
+withHcPkg :: String -> Compiler -> ProgramConfiguration
+          -> (HcPkgInfo -> IO a) -> IO a
+withHcPkg name comp conf f =
+  case compilerFlavor comp of
+    GHC   -> f (GHC.hcPkgInfo conf)
+    GHCJS -> f (GHCJS.hcPkgInfo conf)
+    LHC   -> f (LHC.hcPkgInfo conf)
+    _     -> die ("Distribution.Simple.Register." ++ name ++ ":\
+                  \not implemented for this compiler")
 
 registerPackage :: Verbosity
                 -> InstalledPackageInfo
@@ -211,24 +250,24 @@ registerPackage verbosity installedPkgInfo pkg lbi inplace packageDbs = do
             else "Registering"
   setupMessage verbosity msg (packageId pkg)
   case compilerFlavor (compiler lbi) of
-    GHC  -> GHC.registerPackage  verbosity installedPkgInfo pkg lbi inplace packageDbs
-    LHC  -> LHC.registerPackage  verbosity installedPkgInfo pkg lbi inplace packageDbs
-    UHC  -> UHC.registerPackage  verbosity installedPkgInfo pkg lbi inplace packageDbs
-    JHC  -> notice verbosity "Registering for jhc (nothing to do)"
+    GHC   -> GHC.registerPackage   verbosity installedPkgInfo pkg lbi inplace packageDbs
+    GHCJS -> GHCJS.registerPackage verbosity installedPkgInfo pkg lbi inplace packageDbs
+    LHC   -> LHC.registerPackage   verbosity installedPkgInfo pkg lbi inplace packageDbs
+    UHC   -> UHC.registerPackage   verbosity installedPkgInfo pkg lbi inplace packageDbs
+    JHC   -> notice verbosity "Registering for jhc (nothing to do)"
     HaskellSuite {} ->
       HaskellSuite.registerPackage verbosity installedPkgInfo pkg lbi inplace packageDbs
     _    -> die "Registering is not implemented for this compiler"
 
-
 writeHcPkgRegisterScript :: Verbosity
                          -> InstalledPackageInfo
-                         -> ConfiguredProgram
                          -> PackageDBStack
+                         -> HcPkgInfo
                          -> IO ()
-writeHcPkgRegisterScript verbosity installedPkgInfo hcPkg packageDbs = do
-  let invocation  = HcPkg.reregisterInvocation hcPkg Verbosity.normal
+writeHcPkgRegisterScript verbosity installedPkgInfo packageDbs hpi = do
+  let invocation  = HcPkg.reregisterInvocation hpi Verbosity.normal
                       packageDbs (Right installedPkgInfo)
-      regScript   = invocationAsSystemScript buildOS   invocation
+      regScript   = invocationAsSystemScript buildOS invocation
 
   notice verbosity ("Creating package registration script: " ++ regScriptFileName)
   writeUTF8File regScriptFileName regScript
@@ -300,14 +339,17 @@ generalInstalledPackageInfo adjustRelIncDirs pkg ipid lib lbi clbi installDirs =
     IPI.frameworkDirs      = [],
     IPI.frameworks         = frameworks bi,
     IPI.haddockInterfaces  = [haddockdir installDirs </> haddockName pkg],
-    IPI.haddockHTMLs       = [htmldir installDirs]
+    IPI.haddockHTMLs       = [htmldir installDirs],
+    IPI.pkgRoot            = Nothing
   }
   where
     bi = libBuildInfo lib
     (absinc, relinc) = partition isAbsolute (includeDirs bi)
-    hasModules = not $ null (exposedModules lib)
-                    && null (otherModules bi)
+    hasModules = not $ null (libModules lib)
     hasLibrary = hasModules || not (null (cSources bi))
+                            || (not (null (jsSources bi)) &&
+                                compilerFlavor (compiler lbi) == GHCJS)
+
     -- Since we currently don't decide the InstalledPackageId of our package
     -- until just before we register, we didn't have one for the re-exports
     -- of modules defined within this package, so we used an empty one that
@@ -373,6 +415,28 @@ absoluteInstalledPackageInfo pkg ipid lib lbi clbi =
     bi = libBuildInfo lib
     installDirs = absoluteInstallDirs pkg lbi NoCopyDest
 
+
+relocatableInstalledPackageInfo :: PackageDescription
+                                -> InstalledPackageId
+                                -> Library
+                                -> LocalBuildInfo
+                                -> ComponentLocalBuildInfo
+                                -> FilePath
+                                -> InstalledPackageInfo
+relocatableInstalledPackageInfo pkg ipid lib lbi clbi pkgroot =
+    generalInstalledPackageInfo adjustReativeIncludeDirs
+                                pkg ipid lib lbi clbi installDirs
+  where
+    -- For installed packages we install all include files into one dir,
+    -- whereas in the build tree they may live in multiple local dirs.
+    adjustReativeIncludeDirs _
+      | null (installIncludes bi) = []
+      | otherwise                 = [includedir installDirs]
+    bi = libBuildInfo lib
+
+    installDirs = fmap (("${pkgroot}" </>) . shortRelativePath pkgroot)
+                $ absoluteInstallDirs pkg lbi NoCopyDest
+
 -- -----------------------------------------------------------------------------
 -- Unregistration
 
@@ -383,18 +447,16 @@ unregister pkg lbi regFlags = do
       verbosity = fromFlag (regVerbosity regFlags)
       packageDb = fromFlagOrDefault (registrationPackageDB (withPackageDB lbi))
                                     (regPackageDB regFlags)
+      unreg hpi =
+        let invocation = HcPkg.unregisterInvocation
+                           hpi Verbosity.normal packageDb pkgid
+        in if genScript
+             then writeFileAtomic unregScriptFileName
+                    (BS.Char8.pack $ invocationAsSystemScript buildOS invocation)
+             else runProgramInvocation verbosity invocation
   setupMessage verbosity "Unregistering" pkgid
-  case compilerFlavor (compiler lbi) of
-    GHC ->
-      let Just ghcPkg = lookupProgram ghcPkgProgram (withPrograms lbi)
-          invocation = HcPkg.unregisterInvocation ghcPkg Verbosity.normal
-                         packageDb pkgid
-      in if genScript
-           then writeFileAtomic unregScriptFileName
-                  (BS.Char8.pack $ invocationAsSystemScript buildOS invocation)
-            else runProgramInvocation verbosity invocation
-    _ ->
-        die ("unregistering is only implemented for GHC")
+  withHcPkg "unregistering is only implemented for GHC and GHCJS"
+    (compiler lbi) (withPrograms lbi) unreg
 
 unregScriptFileName :: FilePath
 unregScriptFileName = case buildOS of

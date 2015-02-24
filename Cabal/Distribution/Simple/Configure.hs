@@ -1,3 +1,7 @@
+{-# LANGUAGE DeriveDataTypeable #-}
+{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecordWildCards #-}
+
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Distribution.Simple.Configure
@@ -23,6 +27,7 @@
 
 module Distribution.Simple.Configure (configure,
                                       writePersistBuildConfig,
+                                      getConfigStateFile,
                                       getPersistBuildConfig,
                                       checkPersistBuildConfigOutdated,
                                       tryGetPersistBuildConfig,
@@ -34,9 +39,7 @@ module Distribution.Simple.Configure (configure,
                                       ccLdOptionsBuildInfo,
                                       checkForeignDeps,
                                       interpretPackageDbFlags,
-
-                                      ConfigStateFileErrorType(..),
-                                      ConfigStateFileError,
+                                      ConfigStateFileError(..),
                                       tryGetConfigStateFile,
                                       platformDefines,
                                      )
@@ -47,6 +50,7 @@ import Distribution.Compiler
 import Distribution.Utils.NubList
 import Distribution.Simple.Compiler
     ( CompilerFlavor(..), Compiler(..), compilerFlavor, compilerVersion
+    , compilerInfo
     , showCompilerId, unsupportedLanguages, unsupportedExtensions
     , PackageDB(..), PackageDBStack, reexportedModulesSupported
     , packageKeySupported, renamingPackageFlagsSupported )
@@ -101,28 +105,33 @@ import Distribution.Simple.Utils
     , writeFileAtomic
     , withTempFile )
 import Distribution.System
-    ( OS(..), buildOS, Platform, buildPlatform )
+    ( OS(..), buildOS, Platform (..), buildPlatform )
 import Distribution.Version
          ( Version(..), anyVersion, orLaterVersion, withinRange, isAnyVersion )
 import Distribution.Verbosity
     ( Verbosity, lessVerbose )
 
-import qualified Distribution.Simple.GHC  as GHC
-import qualified Distribution.Simple.JHC  as JHC
-import qualified Distribution.Simple.LHC  as LHC
-import qualified Distribution.Simple.UHC  as UHC
+import qualified Distribution.Simple.GHC   as GHC
+import qualified Distribution.Simple.GHCJS as GHCJS
+import qualified Distribution.Simple.JHC   as JHC
+import qualified Distribution.Simple.LHC   as LHC
+import qualified Distribution.Simple.UHC   as UHC
 import qualified Distribution.Simple.HaskellSuite as HaskellSuite
 
 -- Prefer the more generic Data.Traversable.mapM to Prelude.mapM
 import Prelude hiding ( mapM )
+import Control.Exception
+    ( ErrorCall(..), Exception, evaluate, throw, throwIO, try )
 import Control.Monad
     ( liftM, when, unless, foldM, filterM )
-import Data.Binary ( Binary, decodeOrFail, encode )
-import qualified Data.ByteString.Lazy as BS
+import Distribution.Compat.Binary ( decodeOrFailIO, encode )
+import Data.ByteString.Lazy (ByteString)
+import qualified Data.ByteString            as BS
+import qualified Data.ByteString.Lazy.Char8 as BLC8
 import Data.List
-    ( (\\), nub, partition, isPrefixOf, inits )
+    ( (\\), nub, partition, isPrefixOf, inits, stripPrefix )
 import Data.Maybe
-    ( isNothing, catMaybes, fromMaybe )
+    ( isNothing, catMaybes, fromMaybe, isJust )
 import Data.Either
     ( partitionEithers )
 import qualified Data.Set as Set
@@ -132,6 +141,7 @@ import qualified Data.Map as Map
 import Data.Map (Map)
 import Data.Traversable
     ( mapM )
+import Data.Typeable
 import System.Directory
     ( doesFileExist, createDirectoryIfMissing, getTemporaryDirectory )
 import System.FilePath
@@ -147,109 +157,98 @@ import Text.PrettyPrint
     , quotes, punctuate, nest, sep, hsep )
 import Distribution.Compat.Exception ( catchExit, catchIO )
 
-data ConfigStateFileErrorType = ConfigStateFileCantParse
-                              | ConfigStateFileMissing
-                              | ConfigStateFileBadVersion
-                              deriving Eq
-type ConfigStateFileError = (String, ConfigStateFileErrorType)
+data ConfigStateFileError
+    = ConfigStateFileNoHeader
+    | ConfigStateFileBadHeader
+    | ConfigStateFileNoParse
+    | ConfigStateFileMissing
+    | ConfigStateFileBadVersion PackageIdentifier PackageIdentifier (Either ConfigStateFileError LocalBuildInfo)
+  deriving (Typeable)
 
-tryGetConfigStateFile :: (Binary a) => FilePath
-                      -> IO (Either ConfigStateFileError a)
-tryGetConfigStateFile filename = do
-  exists <- doesFileExist filename
-  if not exists
-    then return missing
-    else do
-      bin <- decodeBinHeader
-      liftM decodeBody $ case bin of
+instance Show ConfigStateFileError where
+    show ConfigStateFileNoHeader =
+        "Saved package config file header is missing. "
+        ++ "Try re-running the 'configure' command."
+    show ConfigStateFileBadHeader =
+        "Saved package config file header is corrupt. "
+        ++ "Try re-running the 'configure' command."
+    show ConfigStateFileNoParse =
+        "Saved package config file body is corrupt. "
+        ++ "Try re-running the 'configure' command."
+    show ConfigStateFileMissing = "Run the 'configure' command first."
+    show (ConfigStateFileBadVersion oldCabal oldCompiler _) =
+        "You need to re-run the 'configure' command. "
+        ++ "The version of Cabal being used has changed (was "
+        ++ display oldCabal ++ ", now "
+        ++ display currentCabalId ++ ")."
+        ++ badCompiler
+      where
+        badCompiler
+          | oldCompiler == currentCompilerId = ""
+          | otherwise =
+              " Additionally the compiler is different (was "
+              ++ display oldCompiler ++ ", now "
+              ++ display currentCompilerId
+              ++ ") which is probably the cause of the problem."
 
-        -- Parsing the binary header may fail because the state file is in
-        -- the text format used by older versions of Cabal. When parsing the
-        -- header fails, try to parse the old text header so we can give the
-        -- user a meaningful message about their Cabal version having
-        -- changed.
-        Left (_, ConfigStateFileCantParse) -> do
-          txt <- decodeTextHeader
-          return $ case txt of
-            Left (_, ConfigStateFileBadVersion) -> txt
-            _ -> bin
+instance Exception ConfigStateFileError
 
-        _ -> return bin
+getConfigStateFile :: FilePath -> IO LocalBuildInfo
+getConfigStateFile filename = do
+    exists <- doesFileExist filename
+    unless exists $ throwIO ConfigStateFileMissing
+    -- Read the config file into a strict ByteString to avoid problems with
+    -- lazy I/O, then convert to lazy because the binary package needs that.
+    contents <- BS.readFile filename
+    let (header, body) = BLC8.span (/='\n') (BLC8.fromChunks [contents])
 
-  where
-    decodeB :: Binary a => BS.ByteString
-            -> Either ConfigStateFileError (BS.ByteString, a)
-    decodeB str = either (const cantParse) return $ do
-        (next, _, x) <- decodeOrFail str
-        return (next, x)
+    headerParseResult <- try $ evaluate $ parseHeader header
+    let (cabalId, compId) =
+            case headerParseResult of
+              Left (ErrorCall _) -> throw ConfigStateFileBadHeader
+              Right x -> x
 
-    decodeBody :: Binary a => Either ConfigStateFileError BS.ByteString
-               -> Either ConfigStateFileError a
-    decodeBody (Left err) = Left err
-    decodeBody (Right body) = fmap snd $ decodeB body
+    let getStoredValue = do
+          result <- decodeOrFailIO (BLC8.tail body)
+          case result of
+            Left _ -> throw ConfigStateFileNoParse
+            Right x -> return x
+        deferErrorIfBadVersion act
+          | cabalId /= currentCabalId = do
+              eResult <- try act
+              throw $ ConfigStateFileBadVersion cabalId compId eResult
+          | otherwise = act
+    deferErrorIfBadVersion getStoredValue
 
-    decodeBinHeader :: IO (Either ConfigStateFileError BS.ByteString)
-    decodeBinHeader = do
-        pbc <- BS.readFile filename
-        return $ do
-            (body, (cabalId, compId)) <- decodeB pbc
-            when (cabalId /= currentCabalId) $ badVersion cabalId compId
-            return body
-
-    decodeTextHeader :: IO (Either ConfigStateFileError BS.ByteString)
-    decodeTextHeader = do
-        header <- liftM (takeWhile $ (/=) '\n') $ readFile filename
-        return $ case parseHeader header of
-            Nothing -> cantParse
-            Just (cabalId, compId) -> badVersion cabalId compId
-
-    missing   = Left ( "Run the 'configure' command first."
-                     , ConfigStateFileMissing )
-    cantParse = Left (  "Saved package config file seems to be corrupt. "
-                     ++ "Try re-running the 'configure' command."
-                     , ConfigStateFileCantParse )
-    badVersion cabalId compId
-              = Left (  "You need to re-run the 'configure' command. "
-                     ++ "The version of Cabal being used has changed (was "
-                     ++ display cabalId ++ ", now "
-                     ++ display currentCabalId ++ ")."
-                     ++ badcompiler compId
-                     , ConfigStateFileBadVersion )
-    badcompiler compId | compId == currentCompilerId = ""
-                       | otherwise
-              = " Additionally the compiler is different (was "
-             ++ display compId ++ ", now "
-             ++ display currentCompilerId
-             ++ ") which is probably the cause of the problem."
+tryGetConfigStateFile :: FilePath
+                      -> IO (Either ConfigStateFileError LocalBuildInfo)
+tryGetConfigStateFile = try . getConfigStateFile
 
 -- |Try to read the 'localBuildInfoFile'.
 tryGetPersistBuildConfig :: FilePath
-                            -> IO (Either ConfigStateFileError LocalBuildInfo)
-tryGetPersistBuildConfig distPref
-    = tryGetConfigStateFile (localBuildInfoFile distPref)
+                         -> IO (Either ConfigStateFileError LocalBuildInfo)
+tryGetPersistBuildConfig = try . getPersistBuildConfig
 
--- |Read the 'localBuildInfoFile'.  Error if it doesn't exist.  Also
--- fail if the file containing LocalBuildInfo is older than the .cabal
--- file, indicating that a re-configure is required.
+-- | Read the 'localBuildInfoFile'. Throw an exception if the file is
+-- missing, if the file cannot be read, or if the file was created by an older
+-- version of Cabal.
 getPersistBuildConfig :: FilePath -> IO LocalBuildInfo
-getPersistBuildConfig distPref = do
-  lbi <- tryGetPersistBuildConfig distPref
-  either (die . fst) return lbi
+getPersistBuildConfig = getConfigStateFile . localBuildInfoFile
 
 -- |Try to read the 'localBuildInfoFile'.
 maybeGetPersistBuildConfig :: FilePath -> IO (Maybe LocalBuildInfo)
-maybeGetPersistBuildConfig distPref = do
-  lbi <- tryGetPersistBuildConfig distPref
-  return $ either (const Nothing) Just lbi
+maybeGetPersistBuildConfig =
+    liftM (either (const Nothing) Just) . tryGetPersistBuildConfig
 
 -- |After running configure, output the 'LocalBuildInfo' to the
 -- 'localBuildInfoFile'.
 writePersistBuildConfig :: FilePath -> LocalBuildInfo -> IO ()
 writePersistBuildConfig distPref lbi = do
-  createDirectoryIfMissing False distPref
-  let header = (currentCabalId, currentCompilerId)
-  writeFileAtomic (localBuildInfoFile distPref)
-      $ BS.append (encode header) (encode lbi)
+    createDirectoryIfMissing False distPref
+    writeFileAtomic (localBuildInfoFile distPref) $
+      BLC8.unlines [showHeader pkgId, encode lbi]
+  where
+    pkgId = packageId $ localPkgDescr lbi
 
 currentCabalId :: PackageIdentifier
 currentCabalId = PackageIdentifier (PackageName "Cabal") cabalVersion
@@ -258,18 +257,25 @@ currentCompilerId :: PackageIdentifier
 currentCompilerId = PackageIdentifier (PackageName System.Info.compilerName)
                                       System.Info.compilerVersion
 
-parseHeader :: String -> Maybe (PackageIdentifier, PackageIdentifier)
-parseHeader header = case words header of
-  ["Saved", "package", "config", "for", pkgid,
-   "written", "by", cabalid, "using", compilerid]
-    -> case (simpleParse pkgid :: Maybe PackageIdentifier,
-             simpleParse cabalid,
-             simpleParse compilerid) of
-        (Just _,
-         Just cabalid',
-         Just compilerid') -> Just (cabalid', compilerid')
-        _                  -> Nothing
-  _                        -> Nothing
+parseHeader :: ByteString -> (PackageIdentifier, PackageIdentifier)
+parseHeader header = case BLC8.words header of
+  ["Saved", "package", "config", "for", pkgId, "written", "by", cabalId, "using", compId] ->
+      fromMaybe (throw ConfigStateFileBadHeader) $ do
+          _ <- simpleParse (BLC8.unpack pkgId) :: Maybe PackageIdentifier
+          cabalId' <- simpleParse (BLC8.unpack cabalId)
+          compId' <- simpleParse (BLC8.unpack compId)
+          return (cabalId', compId')
+  _ -> throw ConfigStateFileNoHeader
+
+showHeader :: PackageIdentifier -> ByteString
+showHeader pkgId = BLC8.unwords
+    [ "Saved", "package", "config", "for"
+    , BLC8.pack $ display pkgId
+    , "written", "by"
+    , BLC8.pack $ display currentCabalId
+    , "using"
+    , BLC8.pack $ display currentCompilerId
+    ]
 
 -- |Check that localBuildInfoFile is up-to-date with respect to the
 -- .cabal file.
@@ -391,7 +397,7 @@ configure (pkg_descr0, pbi) cfg
                        (configConfigurationsFlags cfg)
                        dependencySatisfiable
                        compPlatform
-                       (compilerId comp)
+                       (compilerInfo comp)
                        allConstraints
                        pkg_descr0''
                 of Right r -> return r
@@ -575,6 +581,7 @@ configure (pkg_descr0, pbi) cfg
                 then return False
                 else case flavor of
                             GHC | version >= Version [6,5] [] -> return True
+                            GHCJS                             -> return True
                             _ -> do warn verbosity
                                          ("this compiler does not support " ++
                                           "--enable-split-objs; ignoring")
@@ -591,16 +598,47 @@ configure (pkg_descr0, pbi) cfg
                   -- rely on them. By the time that bug was fixed, ghci had
                   -- been changed to read shared libraries instead of archive
                   -- files (see next code block).
-                  not (GHC.ghcDynamic comp)
+                  not (GHC.isDynamic comp)
+                CompilerId GHCJS _ ->
+                  not (GHCJS.isDynamic comp)
                 _ -> False
 
-        let sharedLibsByDefault =
-              case compilerId comp of
+        let sharedLibsByDefault
+              | fromFlag (configDynExe cfg) =
+                  -- build a shared library if dynamically-linked
+                  -- executables are requested
+                  True
+              | otherwise = case compilerId comp of
                 CompilerId GHC _ ->
                   -- if ghc is dynamic, then ghci needs a shared
                   -- library, so we build one by default.
-                  GHC.ghcDynamic comp
+                  GHC.isDynamic comp
+                CompilerId GHCJS _ ->
+                  GHCJS.isDynamic comp
                 _ -> False
+            withSharedLib_ =
+                -- build shared libraries if required by GHC or by the
+                -- executable linking mode, but allow the user to force
+                -- building only static library archives with
+                -- --disable-shared.
+                fromFlagOrDefault sharedLibsByDefault $ configSharedLib cfg
+            withDynExe_ = fromFlag $ configDynExe cfg
+        when (withDynExe_ && not withSharedLib_) $ warn verbosity $
+               "Executables will use dynamic linking, but a shared library "
+            ++ "is not being built. Linking will fail if any executables "
+            ++ "depend on the library."
+
+        let withProfExe_ = fromFlagOrDefault False $ configProfExe cfg
+            withProfLib_ = fromFlagOrDefault withProfExe_ $ configProfLib cfg
+        when (withProfExe_ && not withProfLib_) $ warn verbosity $
+               "Executables will be built with profiling, but library "
+            ++ "profiling is disabled. Linking will fail if any executables "
+            ++ "depend on the library."
+
+        reloc <-
+           if not (fromFlag $ configRelocatable cfg)
+                then return False
+                else return True
 
         -- detect compiler for build process artifacts
         (buildCompiler', buildCompPlatform', buildCompProgsCfg') <-
@@ -631,12 +669,12 @@ configure (pkg_descr0, pbi) cfg
                     instantiatedWith    = hole_insts,
                     withPrograms        = programsConfig''',
                     withVanillaLib      = fromFlag $ configVanillaLib cfg,
-                    withProfLib         = fromFlag $ configProfLib cfg,
-                    withSharedLib       = fromFlagOrDefault sharedLibsByDefault $
-                                          configSharedLib cfg,
-                    withDynExe          = fromFlag $ configDynExe cfg,
-                    withProfExe         = fromFlag $ configProfExe cfg,
+                    withProfLib         = withProfLib_,
+                    withSharedLib       = withSharedLib_,
+                    withDynExe          = withDynExe_,
+                    withProfExe         = withProfExe_,
                     withOptimization    = fromFlag $ configOptimization cfg,
+                    withDebugInfo       = fromFlag $ configDebugInfo cfg,
                     withGHCiLib         = fromFlagOrDefault ghciLibByDefault $
                                           configGHCiLib cfg,
                     splitObjs           = split_objs,
@@ -644,8 +682,11 @@ configure (pkg_descr0, pbi) cfg
                     stripLibs           = fromFlag $ configStripLibs cfg,
                     withPackageDB       = packageDbs,
                     progPrefix          = fromFlag $ configProgPrefix cfg,
-                    progSuffix          = fromFlag $ configProgSuffix cfg
+                    progSuffix          = fromFlag $ configProgSuffix cfg,
+                    relocatable         = reloc
                   }
+
+        when reloc (checkRelocatable verbosity pkg_descr lbi)
 
         let dirs = absoluteInstallDirs pkg_descr lbi NoCopyDest
             relative = prefixRelativeInstallDirs (packageId pkg_descr) lbi
@@ -798,10 +839,11 @@ getInstalledPackages verbosity comp packageDBs progconf = do
 
   info verbosity "Reading installed packages..."
   case compilerFlavor comp of
-    GHC -> GHC.getInstalledPackages verbosity packageDBs progconf
-    JHC -> JHC.getInstalledPackages verbosity packageDBs progconf
-    LHC -> LHC.getInstalledPackages verbosity packageDBs progconf
-    UHC -> UHC.getInstalledPackages verbosity comp packageDBs progconf
+    GHC   -> GHC.getInstalledPackages verbosity packageDBs progconf
+    GHCJS -> GHCJS.getInstalledPackages verbosity packageDBs progconf
+    JHC   -> JHC.getInstalledPackages verbosity packageDBs progconf
+    LHC   -> LHC.getInstalledPackages verbosity packageDBs progconf
+    UHC   -> UHC.getInstalledPackages verbosity comp packageDBs progconf
     HaskellSuite {} ->
       HaskellSuite.getInstalledPackages verbosity packageDBs progconf
     flv -> die $ "don't know how to find the installed packages for "
@@ -815,7 +857,7 @@ getPackageDBContents verbosity comp packageDB progconf = do
   info verbosity "Reading installed packages..."
   case compilerFlavor comp of
     GHC -> GHC.getPackageDBContents verbosity packageDB progconf
-
+    GHCJS -> GHCJS.getPackageDBContents verbosity packageDB progconf
     -- For other compilers, try to fall back on 'getInstalledPackages'.
     _   -> getInstalledPackages verbosity comp [packageDB] progconf
 
@@ -1118,11 +1160,12 @@ configCompilerEx :: Maybe CompilerFlavor -> Maybe FilePath -> Maybe FilePath
 configCompilerEx Nothing _ _ _ _ = die "Unknown compiler"
 configCompilerEx (Just hcFlavor) hcPath hcPkg conf verbosity = do
   (comp, maybePlatform, programsConfig) <- case hcFlavor of
-    GHC  -> GHC.configure  verbosity hcPath hcPkg conf
-    JHC  -> JHC.configure  verbosity hcPath hcPkg conf
-    LHC  -> do (_, _, ghcConf) <- GHC.configure  verbosity Nothing hcPkg conf
-               LHC.configure  verbosity hcPath Nothing ghcConf
-    UHC  -> UHC.configure  verbosity hcPath hcPkg conf
+    GHC   -> GHC.configure  verbosity hcPath hcPkg conf
+    GHCJS -> GHCJS.configure verbosity hcPath hcPkg conf
+    JHC   -> JHC.configure  verbosity hcPath hcPkg conf
+    LHC   -> do (_, _, ghcConf) <- GHC.configure  verbosity Nothing hcPkg conf
+                LHC.configure  verbosity hcPath Nothing ghcConf
+    UHC   -> UHC.configure  verbosity hcPath hcPkg conf
     HaskellSuite {} -> HaskellSuite.configure verbosity hcPath hcPkg conf
     _    -> die "Unknown compiler"
   return (comp, fromMaybe buildPlatform maybePlatform, programsConfig)
@@ -1567,3 +1610,69 @@ checkPackageProblems verbosity gpkg pkg = do
   if null errors
     then mapM_ (warn verbosity) warnings
     else die (intercalate "\n\n" errors)
+
+-- | Preform checks if a relocatable build is allowed
+checkRelocatable :: Verbosity
+                 -> PackageDescription
+                 -> LocalBuildInfo
+                 -> IO ()
+checkRelocatable verbosity pkg lbi
+    = sequence_ [ checkOS
+                , checkCompiler
+                , packagePrefixRelative
+                , depsPrefixRelative
+                ]
+  where
+    -- Check if the OS support relocatable builds.
+    --
+    -- If you add new OS' to this list, and your OS supports dynamic libraries
+    -- and RPATH, make sure you add your OS to RPATH-support list of:
+    -- Distribution.Simple.GHC.getRPaths
+    checkOS
+        = unless (os `elem` [ OSX, Linux ])
+        $ die $ "Operating system: " ++ display os ++
+                ", does not support relocatable builds"
+      where
+        (Platform _ os) = hostPlatform lbi
+
+    -- Check if the Compiler support relocatable builds
+    checkCompiler
+        = unless (compilerFlavor comp `elem` [ GHC ])
+        $ die $ "Compiler: " ++ show comp ++
+                ", does not support relocatable builds"
+      where
+        comp = compiler lbi
+
+    -- Check if all the install dirs are relative to same prefix
+    packagePrefixRelative
+        = unless (relativeInstallDirs installDirs)
+        $ die $ "Installation directories are not prefix_relative:\n" ++
+                show installDirs
+      where
+        installDirs = absoluteInstallDirs pkg lbi NoCopyDest
+        p           = prefix installDirs
+        relativeInstallDirs (InstallDirs {..}) =
+          all isJust
+              (fmap (stripPrefix p)
+                    [ bindir, libdir, dynlibdir, libexecdir, includedir, datadir
+                    , docdir, mandir, htmldir, haddockdir, sysconfdir] )
+
+    -- Check if the library dirs of the dependencies that are in the package
+    -- database to which the package is installed are relative to the
+    -- prefix of the package
+    depsPrefixRelative = do
+        pkgr <- GHC.pkgRoot verbosity lbi (last (withPackageDB lbi))
+        mapM_ (doCheck pkgr) ipkgs
+      where
+        doCheck pkgr ipkg
+          | maybe False (== pkgr) (Installed.pkgRoot ipkg)
+          = mapM_ (\l -> when (isNothing $ stripPrefix p l) (die (msg l)))
+                  (Installed.libraryDirs ipkg)
+          | otherwise
+          = return ()
+        installDirs   = absoluteInstallDirs pkg lbi NoCopyDest
+        p             = prefix installDirs
+        ipkgs         = PackageIndex.allPackages (installedPkgs lbi)
+        msg l         = "Library directory of a dependency: " ++ show l ++
+                        "\nis not relative to the installation prefix:\n" ++
+                        show p

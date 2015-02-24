@@ -18,6 +18,8 @@ module Distribution.Simple.Program.Builtin (
     -- * Programs that Cabal knows about
     ghcProgram,
     ghcPkgProgram,
+    ghcjsProgram,
+    ghcjsPkgProgram,
     lhcProgram,
     lhcPkgProgram,
     hmakeProgram,
@@ -53,6 +55,8 @@ import Distribution.Simple.Utils
          ( findProgramVersion )
 import Distribution.Compat.Exception
          ( catchIO )
+import Distribution.Verbosity
+         ( lessVerbose )
 import Distribution.Version
          ( Version(..), withinRange, earlierVersion, laterVersion
          , intersectVersionRanges )
@@ -75,6 +79,8 @@ builtinPrograms =
     -- compilers and related progs
       ghcProgram
     , ghcPkgProgram
+    , ghcjsProgram
+    , ghcjsPkgProgram
     , haskellSuiteProgram
     , haskellSuitePkgProgram
     , hmakeProgram
@@ -128,6 +134,21 @@ ghcPkgProgram = (simpleProgram "ghc-pkg") {
     programFindVersion = findProgramVersion "--version" $ \str ->
       -- Invoking "ghc-pkg --version" gives a string like
       -- "GHC package manager version 6.4.1"
+      case words str of
+        (_:_:_:_:ver:_) -> ver
+        _               -> ""
+  }
+
+ghcjsProgram :: Program
+ghcjsProgram = (simpleProgram "ghcjs") {
+    programFindVersion = findProgramVersion "--numeric-ghcjs-version" id
+  }
+
+ghcjsPkgProgram :: Program
+ghcjsPkgProgram = (simpleProgram "ghcjs-pkg") {
+    programFindVersion = findProgramVersion "--ghcjs-version" $ \str ->
+      -- Invoking "ghcjs-pkg --version" gives a string like
+      -- "GHCJS package manager version 6.4.1"
       case words str of
         (_:_:_:_:ver:_) -> ver
         _               -> ""
@@ -245,7 +266,26 @@ arProgram :: Program
 arProgram = simpleProgram "ar"
 
 stripProgram :: Program
-stripProgram = simpleProgram "strip"
+stripProgram = (simpleProgram "strip") {
+    programFindVersion = \verbosity ->
+      findProgramVersion "--version" selectVersion (lessVerbose verbosity)
+  }
+  where
+    selectVersion str =
+      -- Invoking "strip --version" gives very inconsistent
+      -- results. We look for the first word that starts with a
+      -- number, and try parsing out the first two components of
+      -- it. Non-GNU 'strip' doesn't appear to have a version flag.
+      let numeric ""    = False
+          numeric (x:_) = isDigit x
+      in case dropWhile (not . numeric) (words str) of
+        (ver:_) ->
+          -- take the first two version components
+          let isDot         = (== '.')
+              (major, rest) = break isDot ver
+              minor         = takeWhile (not . isDot) (dropWhile isDot rest)
+          in major ++ "." ++ minor
+        _ -> ""
 
 hsc2hsProgram :: Program
 hsc2hsProgram = (simpleProgram "hsc2hs") {
