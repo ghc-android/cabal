@@ -296,6 +296,8 @@ data ConfigFlags = ConfigFlags {
                                           -- executables.
     configProfExe       :: Flag Bool,     -- ^Enable profiling in the
                                           -- executables.
+    configProf          :: Flag Bool,     -- ^Enable profiling in the library
+                                          -- and executables.
     configConfigureArgs :: [String],      -- ^Extra arguments to @configure@
     configOptimization  :: Flag OptimisationLevel,  -- ^Enable optimization.
     configProgPrefix    :: Flag PathTemplate, -- ^Installed executable prefix.
@@ -323,7 +325,7 @@ data ConfigFlags = ConfigFlags {
     configTests               :: Flag Bool, -- ^Enable test suite compilation
     configBenchmarks          :: Flag Bool, -- ^Enable benchmark compilation
     configCoverage :: Flag Bool, -- ^Enable program coverage
-    configLibCoverage :: Flag Bool, -- ^OBSOLETE. Just used to signal error.
+    configLibCoverage :: Flag Bool, -- ^Enable program coverage (deprecated)
     configExactConfiguration  :: Flag Bool,
       -- ^All direct dependencies and flags are provided on the command line by
       -- the user via the '--dependency' and '--flags' options.
@@ -351,6 +353,7 @@ defaultConfigFlags progConf = emptyConfigFlags {
     configSharedLib    = NoFlag,
     configDynExe       = Flag False,
     configProfExe      = NoFlag,
+    configProf         = NoFlag,
     configOptimization = Flag NormalOptimisation,
     configProgPrefix   = Flag (toPathTemplate ""),
     configProgSuffix   = Flag (toPathTemplate ""),
@@ -474,7 +477,7 @@ configureOptions showOrParseArgs =
 
       ,option "" ["profiling"]
          "Executable profiling (requires library profiling)"
-         configProfExe (\v flags -> flags { configProfExe = v })
+         configProf (\v flags -> flags { configProf = v })
          (boolOpt [] [])
 
       ,option "" ["executable-profiling"]
@@ -600,7 +603,7 @@ configureOptions showOrParseArgs =
          (boolOpt [] [])
 
       ,option "" ["library-coverage"]
-         "build package with Haskell Program Coverage. (GHC only) (OBSOLETE)"
+         "build package with Haskell Program Coverage. (GHC only) (DEPRECATED)"
          configLibCoverage (\v flags -> flags { configLibCoverage = v })
          (boolOpt [] [])
 
@@ -751,6 +754,7 @@ instance Monoid ConfigFlags where
     configSharedLib     = mempty,
     configDynExe        = mempty,
     configProfExe       = mempty,
+    configProf          = mempty,
     configConfigureArgs = mempty,
     configOptimization  = mempty,
     configProgPrefix    = mempty,
@@ -795,6 +799,7 @@ instance Monoid ConfigFlags where
     configSharedLib     = combine configSharedLib,
     configDynExe        = combine configDynExe,
     configProfExe       = combine configProfExe,
+    configProf          = combine configProf,
     configConfigureArgs = combine configConfigureArgs,
     configOptimization  = combine configOptimization,
     configProgPrefix    = combine configProgPrefix,
